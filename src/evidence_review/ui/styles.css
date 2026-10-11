@@ -363,3 +363,8 @@ mark.cited-words { background: #fff0bc; text-decoration: underline; text-decorat
 .review-step > summary { cursor: pointer; }
 .review-step > summary h3 { display: inline; font-size: 1rem; }
 .review-step > summary:focus-visible { outline: 2px solid #245c91; outline-offset: 3px; }
+
+#amendment-field[hidden] { display: none; }
+#annotation-tools, #worksheet-tools { margin: .8rem 0; }
+#worksheet-tools input { max-width: 100%; }
+.matching-table { min-height: 12rem; }

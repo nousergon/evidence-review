@@ -414,7 +414,11 @@ class FileStore:
             if state["assessor"] and state["assessor"] != assessor:
                 raise Conflict("task belongs to another assessor")
             if complete and state["submissions"] and not amendment_reason.strip():
-                raise ValueError("amendment reason required")
+                if state["hook"]["status"] == "failed":
+                    # A delivery correction is a system event, not an invented reviewer rationale.
+                    amendment_reason = f"Correction after failed continuation of revision {state['last_submission']}."
+                else:
+                    raise ValueError("amendment reason required")
             revision = state["revision"] + 1
             state.update(
                 revision=revision,

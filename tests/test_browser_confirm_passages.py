@@ -1,5 +1,6 @@
 """Proposed frozen passages become judgment evidence only after reviewer confirmation."""
 
+import pytest
 from playwright.sync_api import expect, sync_playwright
 
 from evidence_review import FileStore, open_review
@@ -239,6 +240,7 @@ def test_native_recomputation_selection_confirms_linked_worksheet_and_passages(t
         page.reload()
         expect(page.get_by_label(field.label, exact=True)).to_have_value("recomputed_matches")
         assert len(store.load_task(b.bundle_id)["answers"]["worksheets"]) == 1
+        page.locator("#worksheet-tools > summary").click()
         page.get_by_role("button", name="Remove worksheet 1", exact=True).click()
         expect(page.locator("#status")).to_contain_text("revision 3")
         expect(page.get_by_label(field.label, exact=True).locator("option:checked")).to_have_text(
@@ -316,4 +318,61 @@ def test_evidence_required_calculation_keeps_its_judgment_attachment_path(tmp_pa
         expect(page.locator("#status")).to_contain_text("revision 2")
         page.get_by_role("button", name="Submit review", exact=True).click()
         expect(page.locator("#continuation")).to_contain_text("Continuation succeeded")
+        browser.close()
+
+def test_correction_after_failed_submission_needs_no_duplicate_tools_or_reason(tmp_path):
+    b = passage_bundle()
+    for field in b.form:
+        field.evidence_required = False
+    b = type(b).model_validate(b.model_dump(mode="json"))
+    store = FileStore(tmp_path)
+    store.register(b)
+    answers = {"judgments": {"support:fees": {"value": "cannot determine"},
+                            "support:review": {"value": "cannot determine"},
+                            "complete": {"value": True}}, "defects": []}
+    store.save_submission(b, 0, "first", answers, "Ada", 0)
+    store.hook_status(b.bundle_id, 1, {"status": "failed", "reason": "consumer rejected", "identifier": None})
+    answers["judgments"]["support:fees"]["note"] = "Corrected after checking."
+    store.save_snapshot(b, 1, "draft", answers, "Ada", 0)
+    with open_review(b, store, launch=False, presentation_mode="atomic-source-check/v1") as h, sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.goto(h.url)
+        expect(page.locator("#status")).to_contain_text("revision 2")
+        assert page.locator("#annotation-tools").get_attribute("open") is None
+        assert page.locator("#worksheet-tools").get_attribute("open") is None
+        expect(page.locator("#amendment")).not_to_be_visible()
+        page.get_by_role("button", name="Submit review", exact=True).click()
+        expect(page.locator("#continuation")).to_contain_text("Continuation succeeded")
+        submission = store.export_submission(b.bundle_id, 3)
+        assert submission.amendment_reason == "Correction after failed continuation of revision 1."
+        assert not submission.annotations and not submission.worksheets
+        browser.close()
+
+
+@pytest.mark.parametrize("plain_label, table_label, matches", [("Revenue", "Revenue", True), ("Class_A", "Class A", False)])
+def test_flattened_citation_shows_unique_matching_frozen_table(tmp_path, plain_label, table_label, matches):
+    from evidence_review.source_rendering import prepare_render_asset
+    text = "# Results\nRevenue $ 120$ 100 20 %\n\n| Metric | Current | Prior | Change |\n| --- | --- | --- | --- |\n| Revenue | $ 120 | $ 100 | 20 % |\n"
+    text = text.replace("Revenue $", plain_label + " $").replace("| Revenue |", "| " + table_label + " |")
+    claim = Claim(claim_id="revenue", text="Revenue was $120.", citations=[located(2, "$ 120")])
+    b = build([("answer", claim.text, ["revenue"])], [claim], sources=[source(text)],
+              form=[FormField(field_id="support:revenue", label="Revenue support", subject_id="revenue",
+                              options=["supported", "cannot determine"])], bundle_id="flattened-table")
+    asset = prepare_render_asset(b, b.sources[0].source_id)
+    with open_review(b, FileStore(tmp_path), launch=False, rendered_sources=[asset],
+                     presentation_mode="atomic-source-check/v1") as h, sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.goto(h.url)
+        page.get_by_role("button", name="View source passage", exact=True).first.click()
+        table = page.get_by_label("Matching source table", exact=True)
+        if matches:
+            expect(table).to_be_visible()
+            expect(table.locator("tr.target-hit")).to_contain_text("$ 120")
+            expect(table.locator("th").first).to_have_text("Metric")
+            expect(page.get_by_text("Original cited passage and full source", exact=True)).to_be_visible()
+        else:
+            expect(table).to_have_count(0)
+            expect(page.locator("#viewer .target-hit")).to_contain_text("Class_A")
         browser.close()

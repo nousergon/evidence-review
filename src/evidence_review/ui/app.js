@@ -165,6 +165,7 @@ function status() {
   const fields = requiredFieldsOnly() ? bundle.form.filter((f) => f.required) : bundle.form;
   const completed = fields.filter((f) => answers.judgments[f.field_id] && answers.judgments[f.field_id].value !== "").length;
   const hook = state.hook;
+  $("amendment-field").hidden = !state.last_submission || hook.status === "failed";
   $("status").className = "";
   $("status").textContent =
     `${matchesSubmitted(answers, $("assessor").value.trim()) ? "Submitted" : "Draft"}: Saved locally · revision ${state.revision} · ${completed}/${fields.length} ${requiredFieldsOnly() ? "required " : ""}fields answered`;
@@ -1805,7 +1806,9 @@ function addWorksheet(subjectRef, from = null) {
   renderWorksheets();
   save();
   const all = document.querySelectorAll("#worksheets .worksheet");
-  all[all.length - 1]?.querySelector("input")?.focus();
+  const input = all[all.length - 1]?.querySelector("input");
+  revealControl(input);
+  input?.focus();
 }
 function worksheetSubjects() {
   const out = [];
@@ -2391,6 +2394,7 @@ async function load() {
     tabStore.get("assessor") ||
     "";
   queue = Promise.resolve();
+  for (const id of ["annotation-tools", "worksheet-tools"]) $(id).open = !atomicMode();
   render();
 }
 $("open-guide").onclick = () => $("review-guide").showModal();
@@ -3088,6 +3092,26 @@ async function openTarget(target, origin, row, note = "") {
     const flag = el("span", record.status === "exact" ? "▶ cited" : record.status === "page_only" ? "▶ cited page" : "? candidate");
     flag.className = "target-flag"; flag.setAttribute("aria-hidden", "true");
     first.prepend(flag);
+    if (record.status === "exact" && !first.closest("table")) {
+      const key = (text) => (text.match(/[\p{L}_]+|\d[\d,]*(?:\.\d+)?|[^\w\s]/gu) || []).join("\u0000");
+      const originalText = first.textContent.replace(/^▶ cited/, "");
+      const matches = [...doc.querySelectorAll("tbody tr")].filter((row) =>
+        key([...row.cells].map((cell) => cell.textContent).join(" ")) === key(originalText));
+      if (matches.length === 1) {
+        const row = matches[0], table = row.closest("table"), copy = table.cloneNode(true);
+        const rowIndex = [...table.rows].indexOf(row), shown = copy.rows[rowIndex];
+        copy.querySelectorAll("[id]").forEach((node) => node.removeAttribute("id"));
+        shown.classList.add("target-hit");
+        const readable = el("div"); readable.className = "rendered-doc matching-table";
+        readable.setAttribute("aria-label", "Matching source table");
+        readable.append(copy);
+        const raw = el("details");
+        raw.append(el("summary", "Original cited passage and full source"), doc);
+        viewer.append(el("p", "The same row text appears in this structured table in the frozen source. Columns are shown as captured; combined cells have not been split or inferred."), readable, raw);
+        statusLine.textContent = "Matching source table · original citation preserved";
+        first = shown;
+      }
+    }
     first.tabIndex = -1;
     first.scrollIntoView({ block: "center" });
     first.focus({ preventScroll: true });

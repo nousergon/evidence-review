@@ -56,7 +56,8 @@
         <p>Support choices do not automatically create a defect. Use Add defect for each verified problem, attach evidence, and decide materiality using the task rubric. Review completion confirms that all identified material defects have been recorded.</p>
         <div id="defects"></div>
         <button id="add-defect" type="button">Add defect</button>
-        <h3>Answer annotations</h3>
+        <details id="annotation-tools" open><summary>Optional: annotate an additional answer passage</summary>
+        <p>Not required. Use only for a passage not already covered by the item checks.</p>
         <p>Select exact text in the answer under review, then annotate it as supported, defective, cannot verify or incomplete. Annotations record only the passages you choose: they are not an exhaustive review, and an unannotated passage is not thereby supported. Record an omission as a defect without answer text.</p>
         <p id="answer-selection" role="status" aria-live="polite" aria-label="Selected answer text">No answer text selected.</p>
         <div id="annotations" aria-label="Answer annotations"></div>
@@ -69,11 +70,12 @@
           <button id="use-typed-text" type="button">Select this occurrence</button>
         </fieldset>
         <button id="add-annotation" type="button">Annotate selected answer text</button>
-        <h3>Reviewer calculation worksheets</h3>
-        <p>Optional. Enter your own formula and inputs when a supplied formula is missing or wrong; the supplied formula is never changed. Attach source passages to each input or mark it unavailable. The arithmetic is recomputed with the same bounded Decimal evaluator and does not decide support.</p>
+        </details>
+        <details id="worksheet-tools" open><summary>Calculation records and optional method corrections</summary>
+        <p>Your calculation choices already save their formula, inputs and source passages. No duplicate entry is needed. Open this editor only to inspect or correct a method; the supplied formula is never changed. Attach source passages to each input or mark it unavailable. The arithmetic is recomputed with the same bounded Decimal evaluator and does not decide support.</p>
         <div id="worksheets" aria-label="Reviewer calculation worksheets"></div>
-        <button id="add-worksheet" type="button">Add calculation worksheet</button
-        ><label>Amendment reason <input id="amendment" /></label
+        <button id="add-worksheet" type="button">Add calculation worksheet</button></details>
+        <label id="amendment-field">Reason for changing an accepted review <input id="amendment" aria-label="Amendment reason" /></label
         ><button id="submit" type="button">Submit review</button
         ><button id="reconcile" type="button">Reconcile continuation</button
         ><button id="next" type="button">Next task</button>

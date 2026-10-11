@@ -159,3 +159,17 @@ def test_optional_unanswered_annotation_is_preserved_but_not_a_verdict(tmp_path)
     }]}
     with pytest.raises(ValueError, match="selection"):
         s.save_submission(b, 1, "forged-evidence", a, "Ada", 0, "check")
+
+def test_failed_submission_correction_records_reason_without_reviewer_typing(tmp_path):
+    b = example_bundle()
+    store = FileStore(tmp_path)
+    store.register(b)
+    store.save_submission(b, 0, "first", answer(), "Ada", 0)
+    store.hook_status(b.bundle_id, 1, {"status": "failed", "reason": "consumer rejected", "identifier": None})
+    prior = store.export_submission(b.bundle_id, 1)
+    result = store.save_submission(b, 1, "corrected", answer(), "Ada", 0)
+    corrected = store.export_submission(b.bundle_id, result["revision"])
+    assert corrected.amendment_reason == "Correction after failed continuation of revision 1."
+    assert corrected.provenance["amends_revision"] == "1"
+    assert store.export_submission(b.bundle_id, 1) == prior
+    assert store.save_submission(b, 1, "corrected", answer(), "Ada", 0)["revision"] == 2

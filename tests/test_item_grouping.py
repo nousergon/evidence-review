@@ -46,7 +46,7 @@ def test_atoms_and_related_controls_live_with_their_item(tmp_path):
         browser.close()
 
 
-def test_intro_is_first_and_invalid_submit_focuses_it_without_losing_draft(tmp_path):
+def test_whole_answer_is_after_items_and_invalid_submit_focuses_it_without_losing_draft(tmp_path):
     b = grouped_bundle()
     store = FileStore(tmp_path)
     with open_review(b, store, launch=False, presentation_mode="atomic-source-check/v1") as h, sync_playwright() as pw:
@@ -56,6 +56,7 @@ def test_intro_is_first_and_invalid_submit_focuses_it_without_losing_draft(tmp_p
         expect(page.locator("#status")).to_contain_text("Saved locally")
         page.get_by_label("Assessor", exact=True).fill("Synthetic reviewer")
         expect(page.locator("#intro-forms").get_by_label("Central conclusion in your words", exact=True)).to_be_visible()
+        assert page.locator("#item-navigation").evaluate("(n) => !!(n.compareDocumentPosition(document.querySelector(\"#intro\")) & Node.DOCUMENT_POSITION_FOLLOWING)")
         page.get_by_label("Support: margin", exact=True).select_option("supported")
         page.get_by_role("button", name="Submit review", exact=True).click()
         expect(page.locator("#status")).to_contain_text("Central conclusion in your words")
@@ -87,4 +88,48 @@ def test_hidden_optional_whole_answer_error_is_revealed_and_focused(tmp_path):
         page.get_by_role("button", name="Submit review", exact=True).click()
         expect(page.get_by_label("Whole answer concern", exact=True)).to_be_focused()
         assert store.load_task(b.bundle_id)["last_submission"] is None
+        browser.close()
+
+
+def test_review_steps_collapse_without_changing_answers_and_reopen_for_navigation(tmp_path):
+    b = grouped_bundle()
+    store = FileStore(tmp_path)
+    with open_review(b, store, launch=False, presentation_mode="atomic-source-check/v1") as h, sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.goto(h.url)
+        expect(page.locator("#status")).to_contain_text("Saved locally")
+        intro = page.get_by_label("Central conclusion in your words", exact=True)
+        page.get_by_label("Assessor", exact=True).fill("Synthetic reviewer")
+        intro.fill("Saved conclusion.")
+        expect(page.locator("#status")).to_contain_text("Saved locally")
+        intro_step = page.locator("#intro-forms > details")
+        intro_step.locator(":scope > summary").click()
+        page.get_by_label("Support: margin", exact=True).select_option("supported")
+        expect(intro).to_be_hidden()  # survives a form rerender
+        expect(page.locator("#status")).to_contain_text("Saved locally")
+        page.get_by_label("Support: margin", exact=True).select_option("")
+        expect(page.locator("#status")).to_contain_text("Saved locally")
+        before = store.load_task(b.bundle_id)["answers"]
+        current = page.get_by_label("Current item", exact=True)
+        expanded_height = current.bounding_box()["height"]
+        current.locator(":scope > summary").focus()
+        page.keyboard.press("Enter")
+        expect(current.locator(".item-atoms")).to_be_hidden()
+        assert current.bounding_box()["height"] < expanded_height / 2
+        page.reload()
+        expect(page.locator("#status")).to_contain_text("Saved locally")
+        expect(intro).to_be_hidden()
+        expect(current.locator(".item-atoms")).to_be_hidden()
+        assert store.load_task(b.bundle_id)["answers"] == before
+        page.get_by_role("region", name="Report").get_by_role("button", name="24.6%: go to its check row", exact=False).click()
+        expect(current.locator(".item-atoms")).to_be_visible()
+        intro_step.locator(":scope > summary").click()
+        expect(intro).to_have_value("Saved conclusion.")
+        intro.fill("")
+        intro_step.locator(":scope > summary").click()
+        page.get_by_label("Assessor", exact=True).fill("Synthetic reviewer")
+        page.get_by_role("button", name="Submit review", exact=True).click()
+        expect(intro).to_be_visible()
+        expect(intro).to_be_focused()
         browser.close()

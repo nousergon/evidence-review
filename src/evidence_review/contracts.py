@@ -10,7 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationInfo, model_validator, model_serializer
 
 
-PACKAGE_VERSION = "0.6.5"
+PACKAGE_VERSION = "0.6.6"
 
 
 def canonical_json(value) -> bytes:

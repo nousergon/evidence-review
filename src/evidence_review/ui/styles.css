@@ -357,3 +357,9 @@ mark.cited-words { background: #fff0bc; text-decoration: underline; text-decorat
 .item-judgment { border-top: 1px solid #d3dde5; padding-top: .5rem; }
 .field-error { color: #9f2323; font-weight: 600; }
 [aria-invalid="true"] { border: 2px solid #9f2323; }
+
+/* Native disclosures keep compact headings keyboard-operable without hiding saved work. */
+.review-step { margin: .6rem 0; border: 1px solid #ccd7e0; border-radius: 4px; padding: .5rem; }
+.review-step > summary { cursor: pointer; }
+.review-step > summary h3 { display: inline; font-size: 1rem; }
+.review-step > summary:focus-visible { outline: 2px solid #245c91; outline-offset: 3px; }

@@ -43,6 +43,30 @@ function el(tag, text) {
   if (text !== undefined) n.textContent = text;
   return n;
 }
+// Expansion is presentation-only, scoped to this bundle and tab, never a judgment.
+function stepKey(key) { return "review-step:" + bundle.bundle_id + ":" + key; }
+function reviewStep(key, title) {
+  const section = el("details");
+  section.className = "review-step";
+  section.dataset.stepKey = stepKey(key);
+  section.open = tabStore.get(stepKey(key)) !== "closed";
+  const summary = el("summary");
+  summary.append(el("h3", title));
+  // Click (including keyboard activation) precedes native toggle and navigation/reload.
+  summary.onclick = () => tabStore.set(stepKey(key), section.open ? "closed" : "open");
+  section.append(summary);
+  section.ontoggle = () => {
+    if (section.isConnected) tabStore.set(stepKey(key), section.open ? "open" : "closed");
+  };
+  return section;
+}
+function revealControl(control) {
+  let ancestor = control?.parentElement;
+  while (ancestor) {
+    if (ancestor.tagName === "DETAILS") ancestor.open = true;
+    ancestor = ancestor.parentElement;
+  }
+}
 // Source-of-truth map for answer annotation: every DOM text node that carries original answer
 // text is registered here with its field and the code-point offset it starts at. Anything else
 // inside an answer host (calculation cards, diagnostics, quantity checkboxes, preview buttons,
@@ -309,7 +333,7 @@ function save(submit = false) {
     showSubmissionBlockers();
     $("status").className = "save-error";
     $("status").textContent = "Not submitted: select supported to confirm the proposed evidence for each previously supported statement.";
-    return;
+    return Promise.resolve();
   }
   attachReferenceEvidenceReceipts();
   const snapshot = structuredClone(answers);
@@ -1001,18 +1025,21 @@ function nextUnanswered() {
 // Opening a statement from the report also makes its decision the current item.
 function followSubject(id) {
   const f = itemFields().find((x) => x.subject_id === id);
-  if (f && f.field_id !== current) {
-    current = f.field_id;
-    renderForms();
+  if (f) {
+    tabStore.set(stepKey("item:" + f.subject_id), "open");
+    if (f.field_id !== current) { current = f.field_id; renderForms(); }
+    revealControl($("field-" + f.field_id));
   }
 }
 function goTo(fieldId, focus = true) {
   current = fieldId;
   const f = bundle.form.find((x) => x.field_id === fieldId);
   const item = f && subjectOf(f);
+  if (f) tabStore.set(stepKey("item:" + f.subject_id), "open");
   if (item && bundle.task_kind !== "reference") showSubject(item, f.subject_id, false);
   if (bundle.task_kind === "reference") referenceEvidenceList(f?.subject_id);
   renderForms();
+  revealControl($("field-" + fieldId));
   if (focus) $("field-" + fieldId)?.focus();
 }
 function claimLinks(f) {
@@ -1396,6 +1423,8 @@ function showSubmissionBlockers() {
   if (pending.length) focusInvalidField(pending[0]);
 }
 function renderForms() {
+  document.querySelectorAll("[data-step-key]").forEach((section) =>
+    tabStore.set(section.dataset.stepKey, section.open ? "open" : "closed"));
   const items = itemFields();
   if (current === null || !items.some((f) => f.field_id === current))
     current = (items.find((f) => f.required && !answered(f)) || items.find((f) => f.required) || {}).field_id ?? null;
@@ -1414,8 +1443,11 @@ function renderForms() {
       seenSubjects.add(f.subject_id);
     }
     const item = subjectOf(f);
-    const div = el("div");
-    div.className = "item" + (answered(f) ? " answered" : "");
+    const div = f.field_id === current
+      ? reviewStep("item:" + f.subject_id, `Item ${i + 1} of ${items.length}: ${f.label}`)
+      : el("div");
+    div.classList.add("item");
+    if (answered(f)) div.classList.add("answered");
     div.dataset.itemSubject = f.subject_id;
     const related = grouped ? items.filter((q) => q.subject_id === f.subject_id) : [f];
     if (f.field_id !== current) {
@@ -1436,7 +1468,6 @@ function renderForms() {
     }
     div.classList.add("current");
     div.setAttribute("aria-label", "Current item");
-    div.append(el("h3", `Item ${i + 1} of ${items.length}: ${f.label}`));
     if (item) {
       div.append(el("p", isReference(f.subject_id) ? "Reference item:" : "Statement under review:"));
       div.append(linkedStatement(item.text, f.subject_id));
@@ -1473,7 +1504,10 @@ function renderForms() {
     next.onclick = () => {
       const target = nextUnanswered();
       if (target) goTo(target.field_id);
-      else $("field-" + (bundle.form.find((x) => !x.subject_id) || {}).field_id)?.focus();
+      else {
+        const control = $("field-" + (bundle.form.find((x) => !x.subject_id) || {}).field_id);
+        revealControl(control); control?.focus();
+      }
     };
     nav.append(prev, next, el("small", " Keys: n next unanswered, p previous."));
     div.append(nav);
@@ -1485,8 +1519,8 @@ function renderForms() {
   presentationFields()
     .filter((f) => !f.subject_id && !f.numeric_span_id && !f.atom)
     .forEach((f) => {
-      const div = el("div");
-      div.className = "field";
+      const div = reviewStep("field:" + f.field_id, f.label);
+      div.classList.add("field");
       fieldControl(f, div);
       const introductory = firstSubject >= 0 && bundle.form.indexOf(f) < firstSubject && !f.require_true;
       $(introductory ? "intro-forms" : "forms").append(div);

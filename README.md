@@ -5,6 +5,8 @@
 ![License](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fnousergon%2Fevidence-review%2Fbadges%2Flicense.json)
 ![Python](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fnousergon%2Fevidence-review%2Fbadges%2Fpython.json)
 
+Inference review can propose exact passages from statement IDs explicitly mentioned in an author’s inference declaration. These are labeled navigation suggestions, not reconstructed author citations or proof of the inference; only an explicit supported choice attaches them. A saved supported choice remains visible when evidence is missing, and submission names the unresolved statement instead of requesting an ineffective repeat action. Historical delivery failures are labeled separately from the current draft.
+
 ## What is this?
 
 A reusable Python package and local browser app for checking reports, claims and calculations against frozen sources and recording human judgments. It automates evidence navigation, autosave, revisions and structured exports. Review data stays with the caller; the app does not call models or upload documents.
@@ -81,3 +83,10 @@ with open_review(bundle, FileStore("review-data"), hooks, blind_markers=identity
 For independent whole-answer review, `open_review(..., required_fields_only=True)` hides optional form controls and counts only required fields. The default remains the full form; reference and adjudication tasks always retain their controls. This display option is returned in `/api/evidence` and never changes bundle hashes, form requirements, validation or saved answers. Existing optional judgments survive saving and submission; if one needs correction, the submission error opens its repair controls. Caller-supplied workload appears in the main header as “Answer 1 of 9” as well as in the review guide.
 
 Callbacks receive recursively immutable submissions. Return status (pending, succeeded, failed, unknown), a durable identifier for success and a reason. Revisions use on_revision. A crash leaves continuation pending and a callback exceeding `timeout` is recorded as unknown; `reconcile` must confirm the caller's own receipt. Side effects are never automatically retried. Concurrent callers, including separate processes sharing a state directory, take a durable claim on each attempt so only one runs the callback, and a late or superseded result cannot overwrite a newer one. This is not exactly-once delivery: a crash or timeout can leave an effect that happened recorded as unknown, so make your callbacks idempotent (for example keyed by bundle and revision). Optional next_bundle supplies the caller-owned queue after successful submission. See [docs/OPERATIONS.md](docs/OPERATIONS.md) for installation pins, schema compatibility, upgrades, recovery, retention and blinding.
+
+For supplied calculations with exact source passages, selecting `recomputed_matches`
+or `recomputed_differs` confirms the displayed formula, inputs and passages together
+and saves one linked reviewer worksheet. A saved verdict without a worksheet is
+shown as pending confirmation. Existing reviewer worksheets are retained; edit them
+to change the method. Nested or unsourced inputs still require an explicit reviewer
+worksheet. Arithmetic agreement does not decide source support.

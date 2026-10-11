@@ -47,6 +47,9 @@ def build_manifest(root, verification, coverage, tests_passed, source_tree):
         "tests_passed": tests_passed,
         "coverage_percent": round(coverage["totals"]["percent_covered"], 2),
         "verified_by_automation": [
+            "native recomputation selection records one linked worksheet with exact proposed operand passages; "
+            "saved verdicts without worksheets stay pending; existing reviewer methods are never overwritten and "
+            "missing source inputs never receive invented receipts (synthetic, Chromium)",
             "contracts, atom/render sidecars and capability negotiation",
             "offline rendering of Markdown, HTML and PDF fixtures with exact, page-only and ambiguous targets",
             "three-pane atomic source-check layout in Chromium at 1400x900 and 640x400 (200% zoom)",

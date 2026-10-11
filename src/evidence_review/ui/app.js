@@ -165,6 +165,7 @@ function status() {
   const fields = requiredFieldsOnly() ? bundle.form.filter((f) => f.required) : bundle.form;
   const completed = fields.filter((f) => answers.judgments[f.field_id] && answers.judgments[f.field_id].value !== "").length;
   const hook = state.hook;
+  $("amendment-field").hidden = !state.last_submission || hook.status === "failed";
   $("status").className = "";
   $("status").textContent =
     `${matchesSubmitted(answers, $("assessor").value.trim()) ? "Submitted" : "Draft"}: Saved locally · revision ${state.revision} · ${completed}/${fields.length} ${requiredFieldsOnly() ? "required " : ""}fields answered`;
@@ -179,6 +180,9 @@ function status() {
       (hook.identifier ? ` · receipt ${hook.identifier}` : "") +
       (hook.reason ? ` · ${hook.reason}` : "")
     : "Continuation not started · nothing submitted yet";
+  if (state.last_submission && !matchesSubmitted(answers, $("assessor").value.trim()))
+    $("continuation").textContent = "Previous submission only · " + $("continuation").textContent +
+      " · Current draft has not been submitted; this is not its validation result.";
   $("next").disabled =
     !matchesSubmitted(answers, $("assessor").value.trim()) || hook.status !== "succeeded";
   showWorksheetResults();
@@ -330,10 +334,18 @@ function attachReferenceEvidenceReceipts() {
   }
 }
 function save(submit = false) {
-  if (submit && bundle.form.some(needsStatementConfirmation)) {
+  const unconfirmed = bundle.form.filter((f) => needsStatementConfirmation(f) || needsWorksheetConfirmation(f));
+  if (submit && unconfirmed.length) {
     showSubmissionBlockers();
     $("status").className = "save-error";
-    $("status").textContent = "Not submitted: select supported to confirm the proposed evidence for each previously supported statement.";
+    $("status").textContent = "Not submitted: " + unconfirmed.map((f) => {
+      if (needsWorksheetConfirmation(f)) return f.label + (proposedWorksheet(fieldCalculation(f))
+        ? ": select a recomputation judgment once to confirm the proposed worksheet"
+        : ": prepare and link a reviewer worksheet, or revise the judgment");
+      const proposed = judgmentCitations(f).some((c) => proposedReceipt(c, f.subject_id));
+      return f.label + (proposed ? ": select supported once to confirm the proposed evidence" :
+        ": no exact passage is proposed; attach checked source evidence or revise the judgment");
+    }).join("; ") + ".";
     return Promise.resolve();
   }
   attachReferenceEvidenceReceipts();
@@ -996,7 +1008,7 @@ function isReference(id) {
 }
 function answered(f) {
   const j = answers.judgments[f.field_id];
-  if (!j || needsStatementConfirmation(f)) return false;
+  if (!j || needsStatementConfirmation(f) || needsWorksheetConfirmation(f)) return false;
   if (f.require_true && j.value !== true) return false;
   if ((f.numeric_verification_values || []).includes(j.value) &&
       bundle.form.some((q) => (q.numeric_span_id || q.atom) && q.subject_id === f.subject_id &&
@@ -1103,10 +1115,30 @@ function calculationCitations(calculation) {
   return (calculation?.operands || []).flatMap((o) =>
     [...(o.citation ? [o.citation] : []), ...calculationCitations(o.calculation)]);
 }
-function judgmentCitations(f) {
-  const item = subjectOf(f);
+function mentionedPremises(item) {
+  // Navigation suggestions only: quoted IDs are not a structured dependency contract.
+  // Never infer a verdict, edit candidate citations or recursively expand prose.
+  const declaration = item?.support_declaration || "";
+  if (!/^inference\s*:/i.test(declaration)) return [];
+  const ids = new Set(), claims = bundle.claims;
+  const escaped = (v) => v.replace(/[.*+?^$\{\}()|[\]\\]/g, "\\$&");
+  for (const claim of claims) {
+    const pattern = new RegExp("(?<![A-Za-z0-9_-])" + escaped(claim.claim_id) + "(?![A-Za-z0-9_])");
+    if (pattern.test(declaration)) ids.add(claim.claim_id);
+  }
+  // Expand a numeric range only when both ends and every intervening ID exist.
+  for (const match of declaration.matchAll(/(?<![A-Za-z0-9_])([A-Za-z_]+)(\d+)\s*[-–]\s*\1(\d+)(?![A-Za-z0-9_])/g)) {
+    const [, prefix, lo, hi] = match, first = Number(lo), last = Number(hi);
+    if (last < first || last - first >= claims.length) continue;
+    const range = Array.from({length: last - first + 1}, (_, i) => prefix + (first + i));
+    if (range.every((id) => claims.some((c) => c.claim_id === id))) range.forEach((id) => ids.add(id));
+  }
+  return claims.filter((c) => c.claim_id !== item.claim_id && ids.has(c.claim_id));
+}
+function directJudgmentCitations(subjectId) {
+  const item = subjectOf({subject_id: subjectId});
   const citations = [...(item?.citations || []), ...calculationCitations(item?.calculation)];
-  for (const span of bundle.spans.filter((s) => s.claim_ids.includes(f.subject_id))) {
+  for (const span of bundle.spans.filter((s) => s.claim_ids.includes(subjectId))) {
     if (span.state === "ambiguous") {
       citations.push({status: "ambiguous", reason: span.reason || "Several source candidates; none chosen"});
       continue;
@@ -1114,6 +1146,10 @@ function judgmentCitations(f) {
     citations.push(...span.citations, ...calculationCitations(span.calculation));
   }
   return citations;
+}
+function judgmentCitations(f) {
+  return [...directJudgmentCitations(f.subject_id),
+    ...mentionedPremises(subjectOf(f)).flatMap((c) => directJudgmentCitations(c.claim_id))];
 }
 function proposedReceipt(c, subjectId) {
   const source = bundle.sources.find((s) => s.source_id === c.source_id);
@@ -1164,6 +1200,10 @@ function renderCandidatePassages(box, citations, subjectId, selections, onConfir
   group.setAttribute("aria-label", "Proposed source passages");
   group.append(el("h4", "Proposed source passages"),
     el("p", statement ? "Choosing supported confirms this statement against all proposed passages below and attaches them in one action. You can inspect the sources before choosing." : "Inspect each passage against this item, then confirm the passages you checked. Confirmation attaches evidence; choose your judgment separately."));
+  const premises = statement ? mentionedPremises(bundle.claims.find((c) => c.claim_id === subjectId)) : [];
+  if (premises.length) group.append(el("p", "Additional passage proposals from statements mentioned in the author's inference: " +
+    premises.map((c) => c.claim_id).join(", ") +
+    ". These are navigation suggestions, not original citations for this statement or proof of the inference. Assess the reasoning and missing qualifications yourself."));
   const seen = new Set(), unresolved = new Set();
   for (const c of citations) {
     const receipt = proposedReceipt(c, subjectId);
@@ -1212,7 +1252,35 @@ function fieldCalculation(f) {
   return {subject: {kind: isReference(f.subject_id) ? "reference" : "claim", id: f.subject_id},
     calculation: item.calculation};
 }
+function needsWorksheetConfirmation(f) {
+  return ["recomputed_matches", "recomputed_differs"].includes(answers.judgments[f.field_id]?.value) &&
+    fieldCalculation(f) && !linkedWorksheet(fieldCalculation(f));
+}
+function linkedWorksheet(supplied) {
+  return supplied && (answers.worksheets || []).find((w) =>
+    w.subject?.kind === supplied.subject.kind && w.subject?.id === supplied.subject.id);
+}
+function proposedWorksheet(supplied) {
+  if (!supplied) return null;
+  const draft = newWorksheet(supplied.subject, supplied.calculation);
+  // Nested/unsourced inputs need an explicit reviewer method, not invented provenance.
+  for (const operand of draft.operands) {
+    const original = supplied.calculation.operands.find((o) => o.name === operand.name);
+    const receipt = original?.citation && proposedReceipt(original.citation, supplied.subject.id);
+    if (original?.calculation || !receipt || !operand.value) return null;
+    operand.selections = [receipt];
+  }
+  draft.rationale = "Confirmed supplied formula, input values and proposed source passages by selecting a recomputation judgment.";
+  return draft;
+}
 function fieldControl(f, div) {
+  const supplied = fieldCalculation(f);
+  const proposal = proposedWorksheet(supplied);
+  const recomputation = (value) => ["recomputed_matches", "recomputed_differs"].includes(value);
+  const calculationJudgment = supplied && (f.options || []).some(recomputation);
+  // Some callers additionally require evidence on the judgment, or mix support
+  // and arithmetic choices. Preserve their separate attachment contract.
+  const worksheetOnly = calculationJudgment && !f.evidence_required && !f.options.includes("supported");
   let control;
   if (f.kind === "boolean" && !f.require_true) {
     control = el("select");
@@ -1224,8 +1292,18 @@ function fieldControl(f, div) {
     control.append(new Option("Choose…", ""));
     f.options.forEach((v) => control.append(new Option(v, v)));
     control.value = answers.judgments[f.field_id]?.value || "";
-    if (needsStatementConfirmation(f)) {
-      control.options[0].textContent = "Previously supported — select supported to confirm evidence";
+    if (needsStatementConfirmation(f) &&
+        judgmentCitations(f).some((c) => proposedReceipt(c, f.subject_id))) {
+      // A native select emits no change when its already-selected value is picked.
+      // Keep the saved judgment, but give its pending evidence confirmation a distinct
+      // display state so one genuine selection of supported records the receipts.
+      control.options[0].textContent = "Supported saved — confirm evidence";
+      control.options[0].disabled = true;
+      control.value = "";
+    }
+    if (needsWorksheetConfirmation(f)) {
+      control.options[0].textContent = proposal ? "Recomputation saved — confirm worksheet" : "Recomputation saved — worksheet required";
+      control.options[0].disabled = true;
       control.value = "";
     }
   } else {
@@ -1234,7 +1312,14 @@ function fieldControl(f, div) {
     if (f.kind === "boolean") control.checked = answers.judgments[f.field_id]?.value === true;
     else control.value = answers.judgments[f.field_id]?.value || "";
   }
-  if (f.help) div.append(el("p", f.help));
+  if (worksheetOnly && proposal)
+    div.append(el("p", "Review the supplied calculation and its source passages below. Choosing a recomputation verdict confirms them together; prepare a draft first if you need a different method."));
+  else if (f.help) div.append(el("p", f.help));
+  if (needsStatementConfirmation(f))
+    div.append(el("p", "Supported is saved, but checked evidence is missing. " +
+      (judgmentCitations(f).some((c) => proposedReceipt(c, f.subject_id))
+        ? "Select supported once to confirm the proposed passages."
+        : "No exact passage is proposed; attach source evidence or revise the judgment.")));
   const meanings = Object.entries(f.option_help || {});
   if (meanings.length) {
     const dl = el("dl");
@@ -1261,6 +1346,11 @@ function fieldControl(f, div) {
     if (groupedItemMode() && f.subject_id) activateItem(f.field_id);
     if (value === "") delete answers.judgments[f.field_id];
     else judgment(f.field_id).value = value;
+    if (proposal && recomputation(value) && !linkedWorksheet(supplied)) {
+      (answers.worksheets ||= []).push(proposal);
+      renderForms();
+      renderWorksheets();
+    }
     if (confirmsStatement(f) && value === "supported") {
       const j = judgment(f.field_id);
       for (const c of judgmentCitations(f)) {
@@ -1269,6 +1359,8 @@ function fieldControl(f, div) {
       }
       renderForms();
     }
+    // Rerendering replaces the select; keep keyboard navigation at this judgment.
+    if (!control.isConnected) document.getElementById(control.id)?.focus({preventScroll: true});
     save();
     progress();
   };
@@ -1288,7 +1380,7 @@ function fieldControl(f, div) {
     div.append(el("p", "Select the claims that address this issue in the report pane."));
   if (bundle.task_kind === "reference")
     div.append(el("p", "Source context is attached automatically for an explained correction or uncertainty. This does not verify it or check quantities. A verified verdict still requires every quantity checked. Additional passage attachments are optional."));
-  if (f.subject_id && !f.numeric_span_id && !f.atom) {
+  if (f.subject_id && !f.numeric_span_id && !f.atom && !worksheetOnly) {
     renderCandidatePassages(div, judgmentCitations(f), f.subject_id,
       answers.judgments[f.field_id]?.selections || [], (receipt) => {
         const j = judgment(f.field_id);
@@ -1296,9 +1388,25 @@ function fieldControl(f, div) {
         renderForms(); save();
       }, confirmsStatement(f));
   }
-  const supplied = fieldCalculation(f);
   if (supplied) {
-    div.append(el("p", "A worksheet starts from the supplied formula and inputs. Check its passages and edit the draft before choosing a recomputation judgment."));
+    const preview = el("section");
+    preview.setAttribute("role", "group");
+    preview.setAttribute("aria-label", "Proposed calculation worksheet");
+    preview.append(el("h4", "Proposed calculation worksheet"));
+    calculationTechnical(supplied.calculation, preview);
+    for (const o of supplied.calculation.operands.filter((o) => o.kind !== "constant")) {
+      preview.append(el("p", `${o.name}: ${o.value} ${o.unit} · ${o.period || "period unspecified"} · ${o.entity || ""} · ${o.metric || ""}`));
+      const receipt = o.citation && proposedReceipt(o.citation, supplied.subject.id);
+      preview.append(el("p", receipt
+        ? `${receipt.source_id} L${receipt.start_line}–L${receipt.end_line}: ${receipt.excerpt}`
+        : "No exact source passage supplied for this input. Prepare or edit a worksheet to record your method."));
+    }
+    preview.append(el("p", linkedWorksheet(supplied)
+      ? "Your linked worksheet is retained. Edit it below if your method changes; selecting a verdict does not replace it."
+      : proposal
+        ? "Check the formula, inputs and passages above. Selecting recomputed_matches or recomputed_differs confirms them together and records one linked worksheet. Arithmetic agreement alone does not establish source support. To use a different method, prepare and edit a draft first."
+        : "This calculation needs a reviewer worksheet: some inputs are nested or lack exact source passages. Prepare and edit the draft before choosing a recomputation judgment."));
+    div.append(preview);
     const prepare = el("button", "Use supplied calculation as draft worksheet");
     prepare.type = "button";
     prepare.onclick = () => {
@@ -1306,7 +1414,9 @@ function fieldControl(f, div) {
         w.subject?.kind === supplied.subject.kind && w.subject?.id === supplied.subject.id);
       if (existing) {
         renderWorksheets();
-        document.querySelector('[data-worksheet="' + CSS.escape(existing.worksheet_id) + '"] input')?.focus();
+        const input = document.querySelector('[data-worksheet="' + CSS.escape(existing.worksheet_id) + '"] input');
+        revealControl(input);
+        input?.focus();
       } else addWorksheet(supplied.subject, supplied.calculation);
     };
     div.append(prepare);
@@ -1323,7 +1433,7 @@ function fieldControl(f, div) {
     renderForms();
     save();
   };
-  div.append(attach);
+  if (!worksheetOnly) div.append(attach);
   for (const [i, s] of (answers.judgments[f.field_id]?.selections || []).entries()) {
     const line = el("p", `${s.source_id} L${s.start_line}–L${s.end_line}: ${s.excerpt}`);
     const remove = el("button", "Remove passage");
@@ -1694,10 +1804,13 @@ function newWorksheet(subjectRef, from = null) {
 }
 function addWorksheet(subjectRef, from = null) {
   (answers.worksheets ||= []).push(newWorksheet(subjectRef, from));
+  renderForms();
   renderWorksheets();
   save();
   const all = document.querySelectorAll("#worksheets .worksheet");
-  all[all.length - 1]?.querySelector("input")?.focus();
+  const input = all[all.length - 1]?.querySelector("input");
+  revealControl(input);
+  input?.focus();
 }
 function worksheetSubjects() {
   const out = [];
@@ -1749,7 +1862,7 @@ function renderWorksheets() {
     pick.onchange = () => {
       const [kind, id] = pick.value.split("\u0000");
       w.subject = pick.value ? { kind, id } : null;
-      renderWorksheets(); save();
+      renderForms(); renderWorksheets(); save();
     };
     subjectLabel.append(pick); div.append(subjectLabel);
     const supplied = suppliedCalculation(w.subject);
@@ -1850,7 +1963,7 @@ function renderWorksheets() {
     const remove = el("button", "Remove worksheet");
     remove.type = "button";
     remove.setAttribute("aria-label", `Remove worksheet ${n}`);
-    remove.onclick = () => { answers.worksheets.splice(i, 1); renderWorksheets(); save(); };
+    remove.onclick = () => { answers.worksheets.splice(i, 1); renderForms(); renderWorksheets(); save(); };
     div.append(remove);
     box.append(div);
   });
@@ -2283,6 +2396,7 @@ async function load() {
     tabStore.get("assessor") ||
     "";
   queue = Promise.resolve();
+  for (const id of ["annotation-tools", "worksheet-tools"]) $(id).open = !atomicMode();
   render();
 }
 $("open-guide").onclick = () => $("review-guide").showModal();
@@ -2980,6 +3094,26 @@ async function openTarget(target, origin, row, note = "") {
     const flag = el("span", record.status === "exact" ? "▶ cited" : record.status === "page_only" ? "▶ cited page" : "? candidate");
     flag.className = "target-flag"; flag.setAttribute("aria-hidden", "true");
     first.prepend(flag);
+    if (record.status === "exact" && !first.closest("table")) {
+      const key = (text) => (text.match(/[\p{L}_]+|\d[\d,]*(?:\.\d+)?|[^\w\s]/gu) || []).join("\u0000");
+      const originalText = first.textContent.replace(/^▶ cited/, "");
+      const matches = [...doc.querySelectorAll("tbody tr")].filter((row) =>
+        key([...row.cells].map((cell) => cell.textContent).join(" ")) === key(originalText));
+      if (matches.length === 1) {
+        const row = matches[0], table = row.closest("table"), copy = table.cloneNode(true);
+        const rowIndex = [...table.rows].indexOf(row), shown = copy.rows[rowIndex];
+        copy.querySelectorAll("[id]").forEach((node) => node.removeAttribute("id"));
+        shown.classList.add("target-hit");
+        const readable = el("div"); readable.className = "rendered-doc matching-table";
+        readable.setAttribute("aria-label", "Matching source table");
+        readable.append(copy);
+        const raw = el("details");
+        raw.append(el("summary", "Original cited passage and full source"), doc);
+        viewer.append(el("p", "The same row text appears in this structured table in the frozen source. Columns are shown as captured; combined cells have not been split or inferred."), readable, raw);
+        statusLine.textContent = "Matching source table · original citation preserved";
+        first = shown;
+      }
+    }
     first.tabIndex = -1;
     first.scrollIntoView({ block: "center" });
     first.focus({ preventScroll: true });

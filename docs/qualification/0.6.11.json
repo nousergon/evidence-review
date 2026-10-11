@@ -1,10 +1,10 @@
 {
   "schema_version": "evidence-review-qualification/v1",
   "package_version": "0.6.11",
-  "source_tree_sha1": "f30487707438a79493499b6c5b07c016de7797c9",
-  "verified_source_commit": "e44d120fcc81854436d3b775630dfd6d9d94fdc8",
+  "source_tree_sha1": "8ad6ae7c400f49cdd8039043cda0c2beb00509a6",
+  "verified_source_commit": "c15a11cfb695a253652f2018db959f53d5849fd0",
   "wheel": "evidence_review-0.6.11-py3-none-any.whl",
-  "wheel_sha256": "d77f261cd09b27566c74782ce959b191f6295f3a11bc7fe39493e694a1964b36",
+  "wheel_sha256": "b7ec569941229f71768db09505a9967bc9976e612d7336015832987ef4d30e97",
   "reproducible_wheel": true,
   "clean_noneditable_install": true,
   "installed_files": {

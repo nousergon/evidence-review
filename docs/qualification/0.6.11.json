@@ -1,8 +1,8 @@
 {
   "schema_version": "evidence-review-qualification/v1",
   "package_version": "0.6.11",
-  "source_tree_sha1": "35af02bf6a8276633807d24792570b74576ef2fd",
-  "verified_source_commit": "c615cacb604a2f309ee18c4458964912bfa917f9",
+  "source_tree_sha1": "f30487707438a79493499b6c5b07c016de7797c9",
+  "verified_source_commit": "e44d120fcc81854436d3b775630dfd6d9d94fdc8",
   "wheel": "evidence_review-0.6.11-py3-none-any.whl",
   "wheel_sha256": "d77f261cd09b27566c74782ce959b191f6295f3a11bc7fe39493e694a1964b36",
   "reproducible_wheel": true,

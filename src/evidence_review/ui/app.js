@@ -1276,6 +1276,10 @@ function fieldControl(f, div) {
   const supplied = fieldCalculation(f);
   const proposal = proposedWorksheet(supplied);
   const recomputation = (value) => ["recomputed_matches", "recomputed_differs"].includes(value);
+  const calculationJudgment = supplied && (f.options || []).some(recomputation);
+  // Some callers additionally require evidence on the judgment, or mix support
+  // and arithmetic choices. Preserve their separate attachment contract.
+  const worksheetOnly = calculationJudgment && !f.evidence_required && !f.options.includes("supported");
   let control;
   if (f.kind === "boolean" && !f.require_true) {
     control = el("select");
@@ -1307,7 +1311,9 @@ function fieldControl(f, div) {
     if (f.kind === "boolean") control.checked = answers.judgments[f.field_id]?.value === true;
     else control.value = answers.judgments[f.field_id]?.value || "";
   }
-  if (f.help) div.append(el("p", f.help));
+  if (worksheetOnly && proposal)
+    div.append(el("p", "Review the supplied calculation and its source passages below. Choosing a recomputation verdict confirms them together; prepare a draft first if you need a different method."));
+  else if (f.help) div.append(el("p", f.help));
   if (needsStatementConfirmation(f))
     div.append(el("p", "Supported is saved, but checked evidence is missing. " +
       (judgmentCitations(f).some((c) => proposedReceipt(c, f.subject_id))
@@ -1373,7 +1379,7 @@ function fieldControl(f, div) {
     div.append(el("p", "Select the claims that address this issue in the report pane."));
   if (bundle.task_kind === "reference")
     div.append(el("p", "Source context is attached automatically for an explained correction or uncertainty. This does not verify it or check quantities. A verified verdict still requires every quantity checked. Additional passage attachments are optional."));
-  if (f.subject_id && !f.numeric_span_id && !f.atom) {
+  if (f.subject_id && !f.numeric_span_id && !f.atom && !worksheetOnly) {
     renderCandidatePassages(div, judgmentCitations(f), f.subject_id,
       answers.judgments[f.field_id]?.selections || [], (receipt) => {
         const j = judgment(f.field_id);
@@ -1424,7 +1430,7 @@ function fieldControl(f, div) {
     renderForms();
     save();
   };
-  div.append(attach);
+  if (!worksheetOnly) div.append(attach);
   for (const [i, s] of (answers.judgments[f.field_id]?.selections || []).entries()) {
     const line = el("p", `${s.source_id} L${s.start_line}–L${s.end_line}: ${s.excerpt}`);
     const remove = el("button", "Remove passage");

@@ -214,6 +214,8 @@ def test_native_recomputation_selection_confirms_linked_worksheet_and_passages(t
         control = page.get_by_label(field.label, exact=True)
         expect(control.locator("option:checked")).to_have_text("Recomputation saved — confirm worksheet")
         preview = page.get_by_role("group", name="Proposed calculation worksheet")
+        expect(group.get_by_role("button", name="Confirm checked passage", exact=True)).to_have_count(0)
+        expect(group.get_by_role("button", name="Attach selected source passage", exact=True)).to_have_count(0)
         expect(preview).to_contain_text("(current - prior) * 100")
         expect(preview).to_contain_text("24.6%")
         assert not store.load_task(b.bundle_id)["answers"].get("worksheets")
@@ -291,4 +293,27 @@ def test_unsourced_calculation_does_not_invent_a_reviewer_worksheet(tmp_path):
         page.reload()
         expect(page.get_by_label("Margin arithmetic", exact=True).locator("option:checked")).to_have_text(
             "Recomputation saved — worksheet required")
+        browser.close()
+
+
+def test_evidence_required_calculation_keeps_its_judgment_attachment_path(tmp_path):
+    from test_reviewer_worksheet import worksheet_bundle
+
+    b = worksheet_bundle()
+    b.form = [FormField(field_id="calc:margin", label="Margin arithmetic", evidence_required=True,
+                        options=["recomputed_differs"], subject_id="margin")]
+    b = type(b).model_validate(b.model_dump(mode="json"))
+    store = FileStore(tmp_path)
+    with open_review(b, store, launch=False, presentation_mode="atomic-source-check/v1") as h, sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.goto(h.url)
+        page.get_by_label("Assessor", exact=True).fill("Synthetic reviewer")
+        page.get_by_label("Margin arithmetic", exact=True).select_option("recomputed_differs")
+        expect(page.locator("#status")).to_contain_text("revision 1")
+        expect(page.get_by_role("button", name="Attach selected source passage", exact=True)).to_be_visible()
+        page.get_by_role("button", name="Confirm checked passage", exact=True).first.click()
+        expect(page.locator("#status")).to_contain_text("revision 2")
+        page.get_by_role("button", name="Submit review", exact=True).click()
+        expect(page.locator("#continuation")).to_contain_text("Continuation succeeded")
         browser.close()

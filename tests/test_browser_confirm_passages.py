@@ -240,7 +240,9 @@ def test_native_recomputation_selection_confirms_linked_worksheet_and_passages(t
         page.reload()
         expect(page.get_by_label(field.label, exact=True)).to_have_value("recomputed_matches")
         assert len(store.load_task(b.bundle_id)["answers"]["worksheets"]) == 1
-        page.locator("#worksheet-tools > summary").click()
+        assert page.locator("#worksheet-tools").get_attribute("open") is None
+        group.get_by_role("button", name="Use supplied calculation as draft worksheet", exact=True).click()
+        expect(page.get_by_role("group", name="Worksheet 1", exact=True)).to_be_visible()
         page.get_by_role("button", name="Remove worksheet 1", exact=True).click()
         expect(page.locator("#status")).to_contain_text("revision 3")
         expect(page.get_by_label(field.label, exact=True).locator("option:checked")).to_have_text(

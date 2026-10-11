@@ -1414,7 +1414,9 @@ function fieldControl(f, div) {
         w.subject?.kind === supplied.subject.kind && w.subject?.id === supplied.subject.id);
       if (existing) {
         renderWorksheets();
-        document.querySelector('[data-worksheet="' + CSS.escape(existing.worksheet_id) + '"] input')?.focus();
+        const input = document.querySelector('[data-worksheet="' + CSS.escape(existing.worksheet_id) + '"] input');
+        revealControl(input);
+        input?.focus();
       } else addWorksheet(supplied.subject, supplied.calculation);
     };
     div.append(prepare);

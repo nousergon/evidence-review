@@ -179,6 +179,9 @@ function status() {
       (hook.identifier ? ` · receipt ${hook.identifier}` : "") +
       (hook.reason ? ` · ${hook.reason}` : "")
     : "Continuation not started · nothing submitted yet";
+  if (state.last_submission && !matchesSubmitted(answers, $("assessor").value.trim()))
+    $("continuation").textContent = "Previous submission only · " + $("continuation").textContent +
+      " · Current draft has not been submitted; this is not its validation result.";
   $("next").disabled =
     !matchesSubmitted(answers, $("assessor").value.trim()) || hook.status !== "succeeded";
   showWorksheetResults();
@@ -330,10 +333,15 @@ function attachReferenceEvidenceReceipts() {
   }
 }
 function save(submit = false) {
-  if (submit && bundle.form.some(needsStatementConfirmation)) {
+  const unconfirmed = bundle.form.filter(needsStatementConfirmation);
+  if (submit && unconfirmed.length) {
     showSubmissionBlockers();
     $("status").className = "save-error";
-    $("status").textContent = "Not submitted: select supported to confirm the proposed evidence for each previously supported statement.";
+    $("status").textContent = "Not submitted: " + unconfirmed.map((f) => {
+      const proposed = judgmentCitations(f).some((c) => proposedReceipt(c, f.subject_id));
+      return f.label + (proposed ? ": select supported once to confirm the proposed evidence" :
+        ": no exact passage is proposed; attach checked source evidence or revise the judgment");
+    }).join("; ") + ".";
     return Promise.resolve();
   }
   attachReferenceEvidenceReceipts();
@@ -1103,10 +1111,30 @@ function calculationCitations(calculation) {
   return (calculation?.operands || []).flatMap((o) =>
     [...(o.citation ? [o.citation] : []), ...calculationCitations(o.calculation)]);
 }
-function judgmentCitations(f) {
-  const item = subjectOf(f);
+function mentionedPremises(item) {
+  // Navigation suggestions only: quoted IDs are not a structured dependency contract.
+  // Never infer a verdict, edit candidate citations or recursively expand prose.
+  const declaration = item?.support_declaration || "";
+  if (!/^inference\s*:/i.test(declaration)) return [];
+  const ids = new Set(), claims = bundle.claims;
+  const escaped = (v) => v.replace(/[.*+?^$\{\}()|[\]\\]/g, "\\$&");
+  for (const claim of claims) {
+    const pattern = new RegExp("(?<![A-Za-z0-9_-])" + escaped(claim.claim_id) + "(?![A-Za-z0-9_])");
+    if (pattern.test(declaration)) ids.add(claim.claim_id);
+  }
+  // Expand a numeric range only when both ends and every intervening ID exist.
+  for (const match of declaration.matchAll(/(?<![A-Za-z0-9_])([A-Za-z_]+)(\d+)\s*[-–]\s*\1(\d+)(?![A-Za-z0-9_])/g)) {
+    const [, prefix, lo, hi] = match, first = Number(lo), last = Number(hi);
+    if (last < first || last - first >= claims.length) continue;
+    const range = Array.from({length: last - first + 1}, (_, i) => prefix + (first + i));
+    if (range.every((id) => claims.some((c) => c.claim_id === id))) range.forEach((id) => ids.add(id));
+  }
+  return claims.filter((c) => c.claim_id !== item.claim_id && ids.has(c.claim_id));
+}
+function directJudgmentCitations(subjectId) {
+  const item = subjectOf({subject_id: subjectId});
   const citations = [...(item?.citations || []), ...calculationCitations(item?.calculation)];
-  for (const span of bundle.spans.filter((s) => s.claim_ids.includes(f.subject_id))) {
+  for (const span of bundle.spans.filter((s) => s.claim_ids.includes(subjectId))) {
     if (span.state === "ambiguous") {
       citations.push({status: "ambiguous", reason: span.reason || "Several source candidates; none chosen"});
       continue;
@@ -1114,6 +1142,10 @@ function judgmentCitations(f) {
     citations.push(...span.citations, ...calculationCitations(span.calculation));
   }
   return citations;
+}
+function judgmentCitations(f) {
+  return [...directJudgmentCitations(f.subject_id),
+    ...mentionedPremises(subjectOf(f)).flatMap((c) => directJudgmentCitations(c.claim_id))];
 }
 function proposedReceipt(c, subjectId) {
   const source = bundle.sources.find((s) => s.source_id === c.source_id);
@@ -1164,6 +1196,10 @@ function renderCandidatePassages(box, citations, subjectId, selections, onConfir
   group.setAttribute("aria-label", "Proposed source passages");
   group.append(el("h4", "Proposed source passages"),
     el("p", statement ? "Choosing supported confirms this statement against all proposed passages below and attaches them in one action. You can inspect the sources before choosing." : "Inspect each passage against this item, then confirm the passages you checked. Confirmation attaches evidence; choose your judgment separately."));
+  const premises = statement ? mentionedPremises(bundle.claims.find((c) => c.claim_id === subjectId)) : [];
+  if (premises.length) group.append(el("p", "Additional passage proposals from statements mentioned in the author's inference: " +
+    premises.map((c) => c.claim_id).join(", ") +
+    ". These are navigation suggestions, not original citations for this statement or proof of the inference. Assess the reasoning and missing qualifications yourself."));
   const seen = new Set(), unresolved = new Set();
   for (const c of citations) {
     const receipt = proposedReceipt(c, subjectId);
@@ -1224,10 +1260,7 @@ function fieldControl(f, div) {
     control.append(new Option("Choose…", ""));
     f.options.forEach((v) => control.append(new Option(v, v)));
     control.value = answers.judgments[f.field_id]?.value || "";
-    if (needsStatementConfirmation(f)) {
-      control.options[0].textContent = "Previously supported — select supported to confirm evidence";
-      control.value = "";
-    }
+
   } else {
     control = el("input");
     control.type = f.kind === "boolean" ? "checkbox" : "text";
@@ -1235,6 +1268,11 @@ function fieldControl(f, div) {
     else control.value = answers.judgments[f.field_id]?.value || "";
   }
   if (f.help) div.append(el("p", f.help));
+  if (needsStatementConfirmation(f))
+    div.append(el("p", "Supported is saved, but checked evidence is missing. " +
+      (judgmentCitations(f).some((c) => proposedReceipt(c, f.subject_id))
+        ? "Select supported once to confirm the proposed passages."
+        : "No exact passage is proposed; attach source evidence or revise the judgment.")));
   const meanings = Object.entries(f.option_help || {});
   if (meanings.length) {
     const dl = el("dl");

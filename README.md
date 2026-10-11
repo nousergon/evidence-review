@@ -5,6 +5,8 @@
 ![License](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fnousergon%2Fevidence-review%2Fbadges%2Flicense.json)
 ![Python](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fnousergon%2Fevidence-review%2Fbadges%2Fpython.json)
 
+Inference review can propose exact passages from statement IDs explicitly mentioned in an author’s inference declaration. These are labeled navigation suggestions, not reconstructed author citations or proof of the inference; only an explicit supported choice attaches them. A saved supported choice remains visible when evidence is missing, and submission names the unresolved statement instead of requesting an ineffective repeat action. Historical delivery failures are labeled separately from the current draft.
+
 ## What is this?
 
 A reusable Python package and local browser app for checking reports, claims and calculations against frozen sources and recording human judgments. It automates evidence navigation, autosave, revisions and structured exports. Review data stays with the caller; the app does not call models or upload documents.

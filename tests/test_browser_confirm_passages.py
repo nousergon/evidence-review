@@ -38,7 +38,7 @@ def test_supported_confirms_all_statement_passages_in_one_saved_action(tmp_path)
         passage = item.get_by_role("group", name="Proposed source passages")
         expect(passage.get_by_role("button", name="Confirm checked passage", exact=True)).to_have_count(0)
         assert not store.load_task(b.bundle_id)["answers"]["judgments"]["support:fees"]["selections"]
-        expect(item.get_by_label("Support: fees", exact=True)).to_have_value("")
+        expect(item.get_by_label("Support: fees", exact=True)).to_have_value("supported")
         page.get_by_role("button", name="Submit review", exact=True).click()
         expect(page.locator("#status")).to_contain_text("confirm the proposed evidence")
         assert store.load_task(b.bundle_id)["last_submission"] is None
@@ -120,4 +120,48 @@ def test_current_calculation_prepares_one_linked_draft_with_named_constants(tmp_
         prepare.click()
         expect(page.locator("#worksheets .worksheet")).to_have_count(1)
         assert span.calculation.formula == "(current - prior) * scale"
+        browser.close()
+
+def test_inference_proposes_named_premise_passages_without_changing_originals(tmp_path):
+    b = passage_bundle()
+    b.claims = [
+        Claim(claim_id="C1", text="First premise", citations=[located(2, "exclude service fees")]),
+        Claim(claim_id="C2", text="Second premise", citations=[located(3, "review rule")]),
+        Claim(claim_id="C3", text="Inference", support_declaration="inference: Weighting C1-C2."),
+    ]
+    b.fields[0].claim_ids = ["C1", "C2", "C3"]
+    b.form = [FormField(field_id="support:C3", label="Support inference", subject_id="C3",
+                        options=["supported", "cannot determine"], evidence_required=True)]
+    b = type(b).model_validate(b.model_dump(mode="json"))
+    store = FileStore(tmp_path)
+    with open_review(b, store, launch=False, presentation_mode="atomic-source-check/v1") as h, sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.goto(h.url)
+        proposals = page.get_by_role("group", name="Proposed source passages")
+        expect(proposals).to_contain_text("C1, C2")
+        expect(proposals.get_by_role("button", name="View source passage")).to_have_count(2)
+        assert not store.load_task(b.bundle_id)["answers"]["judgments"]
+        page.get_by_label("Assessor", exact=True).fill("Synthetic reviewer")
+        page.get_by_label("Support inference", exact=True).select_option("supported")
+        expect(page.locator("#status")).to_contain_text("revision 1")
+        saved = store.load_task(b.bundle_id)["answers"]["judgments"]["support:C3"]
+        assert [(s["start_line"], s["subject_id"]) for s in saved["selections"]] == [(2, "C3"), (3, "C3")]
+        assert b.claims[2].citations == []
+        browser.close()
+
+
+def test_missing_proposals_name_actual_blocker_instead_of_reselection_loop(tmp_path):
+    b = passage_bundle()
+    b.claims[0].citations = []
+    store = FileStore(tmp_path)
+    store.register(b)
+    store.save_snapshot(b, 0, "old-answer", {"judgments": {"support:fees": {"value": "supported"}}}, "Synthetic reviewer", 0)
+    with open_review(b, store, launch=False) as h, sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.goto(h.url)
+        page.get_by_role("button", name="Submit review", exact=True).click()
+        expect(page.locator("#status")).to_contain_text("Support: fees")
+        expect(page.locator("#status")).to_contain_text("no exact passage is proposed")
         browser.close()

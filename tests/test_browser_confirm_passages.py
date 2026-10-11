@@ -189,3 +189,106 @@ def test_pending_supported_confirmation_works_with_native_keyboard(tmp_path):
         saved = store.load_task(b.bundle_id)["answers"]["judgments"]["support:fees"]
         assert saved["value"] == "supported" and len(saved["selections"]) == 1
         browser.close()
+
+
+def test_native_recomputation_selection_confirms_linked_worksheet_and_passages(tmp_path):
+    from test_reviewer_worksheet import worksheet_bundle
+
+    b = worksheet_bundle()
+    span = next(s for s in b.spans if s.text == "180 bps")
+    span.calculation.formula = "(current - prior) * 100"
+    field = FormField(field_id="calc:" + span.span_id, label="Recomputed margin",
+                      options=["recomputed_matches", "recomputed_differs", "cannot determine"], subject_id="margin")
+    b.form.insert(0, field)
+    b = type(b).model_validate(b.model_dump(mode="json"))
+    store = FileStore(tmp_path)
+    store.register(b)
+    store.save_snapshot(b, 0, "old-calculation", {"judgments": {field.field_id: {"value": "recomputed_matches"}}}, "Synthetic reviewer", 0)
+    with open_review(b, store, launch=False, presentation_mode="atomic-source-check/v1") as h, sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.goto(h.url)
+        group = page.locator('details.item[data-item-subject="margin"]')
+        if group.get_attribute("open") is None:
+            group.locator(":scope > summary").click()
+        control = page.get_by_label(field.label, exact=True)
+        expect(control.locator("option:checked")).to_have_text("Recomputation saved — confirm worksheet")
+        preview = page.get_by_role("group", name="Proposed calculation worksheet")
+        expect(preview).to_contain_text("(current - prior) * 100")
+        expect(preview).to_contain_text("24.6%")
+        assert not store.load_task(b.bundle_id)["answers"].get("worksheets")
+        expect(page.get_by_label("Review progress")).to_contain_text("0 of 3 required fields complete")
+        page.get_by_role("button", name="Submit review", exact=True).click()
+        expect(page.locator("#status")).to_contain_text("confirm the proposed worksheet")
+        assert store.load_task(b.bundle_id)["last_submission"] is None
+        control.focus()
+        page.keyboard.press("r")
+        page.keyboard.press("Tab")
+        expect(page.get_by_label("Explanation: Recomputed margin", exact=True)).to_be_focused()
+        expect(page.locator("#status")).to_contain_text("revision 2")
+        saved = store.load_task(b.bundle_id)["answers"]
+        assert saved["judgments"][field.field_id]["value"] == "recomputed_matches"
+        w = saved["worksheets"][0]
+        assert w["subject"] == {"kind": "span", "id": span.span_id}
+        assert w["computation"]["comparison"] == "match"
+        assert w["reviewer_support"] == "unknown"
+        assert all(o["selections"][0]["excerpt"] for o in w["operands"])
+        assert "Confirmed supplied formula" in w["rationale"]
+        page.reload()
+        expect(page.get_by_label(field.label, exact=True)).to_have_value("recomputed_matches")
+        assert len(store.load_task(b.bundle_id)["answers"]["worksheets"]) == 1
+        page.get_by_role("button", name="Remove worksheet 1", exact=True).click()
+        expect(page.locator("#status")).to_contain_text("revision 3")
+        expect(page.get_by_label(field.label, exact=True).locator("option:checked")).to_have_text(
+            "Recomputation saved — confirm worksheet")
+        browser.close()
+
+
+def test_recomputation_selection_preserves_edited_worksheet(tmp_path):
+    from test_reviewer_worksheet import worksheet_bundle, revenue_worksheet
+
+    b = worksheet_bundle()
+    b.form.insert(0, FormField(field_id="calc:margin", label="Margin arithmetic",
+                              options=["recomputed_matches", "recomputed_differs"], subject_id="margin"))
+    edited = revenue_worksheet(b, subject={"kind": "claim", "id": "margin"})
+    store = FileStore(tmp_path)
+    store.register(b)
+    store.save_snapshot(b, 0, "edited", {"worksheets": [edited]}, "Synthetic reviewer", 0)
+    original = store.load_task(b.bundle_id)["answers"]["worksheets"]
+    with open_review(b, store, launch=False, presentation_mode="atomic-source-check/v1") as h, sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.goto(h.url)
+        control = page.get_by_label("Margin arithmetic", exact=True)
+        control.select_option("recomputed_differs")
+        expect(page.locator("#status")).to_contain_text("revision 2")
+        assert store.load_task(b.bundle_id)["answers"]["worksheets"] == original
+        control.select_option("recomputed_matches")
+        expect(page.locator("#status")).to_contain_text("revision 3")
+        assert store.load_task(b.bundle_id)["answers"]["worksheets"] == original
+        browser.close()
+
+
+def test_unsourced_calculation_does_not_invent_a_reviewer_worksheet(tmp_path):
+    from test_reviewer_worksheet import worksheet_bundle
+
+    b = worksheet_bundle()
+    b.claims[0].calculation.operands[0].citation = None
+    b.form.insert(0, FormField(field_id="calc:margin", label="Margin arithmetic",
+                              options=["recomputed_matches", "recomputed_differs"], subject_id="margin"))
+    b = type(b).model_validate(b.model_dump(mode="json"))
+    store = FileStore(tmp_path)
+    with open_review(b, store, launch=False, presentation_mode="atomic-source-check/v1") as h, sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.goto(h.url)
+        page.get_by_label("Assessor", exact=True).fill("Synthetic reviewer")
+        preview = page.get_by_role("group", name="Proposed calculation worksheet")
+        expect(preview).to_contain_text("No exact source passage supplied")
+        page.get_by_label("Margin arithmetic", exact=True).select_option("recomputed_matches")
+        expect(page.locator("#status")).to_contain_text("revision 1")
+        assert not store.load_task(b.bundle_id)["answers"].get("worksheets")
+        page.reload()
+        expect(page.get_by_label("Margin arithmetic", exact=True).locator("option:checked")).to_have_text(
+            "Recomputation saved — worksheet required")
+        browser.close()

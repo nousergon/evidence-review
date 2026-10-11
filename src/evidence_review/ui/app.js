@@ -333,11 +333,14 @@ function attachReferenceEvidenceReceipts() {
   }
 }
 function save(submit = false) {
-  const unconfirmed = bundle.form.filter(needsStatementConfirmation);
+  const unconfirmed = bundle.form.filter((f) => needsStatementConfirmation(f) || needsWorksheetConfirmation(f));
   if (submit && unconfirmed.length) {
     showSubmissionBlockers();
     $("status").className = "save-error";
     $("status").textContent = "Not submitted: " + unconfirmed.map((f) => {
+      if (needsWorksheetConfirmation(f)) return f.label + (proposedWorksheet(fieldCalculation(f))
+        ? ": select a recomputation judgment once to confirm the proposed worksheet"
+        : ": prepare and link a reviewer worksheet, or revise the judgment");
       const proposed = judgmentCitations(f).some((c) => proposedReceipt(c, f.subject_id));
       return f.label + (proposed ? ": select supported once to confirm the proposed evidence" :
         ": no exact passage is proposed; attach checked source evidence or revise the judgment");
@@ -1004,7 +1007,7 @@ function isReference(id) {
 }
 function answered(f) {
   const j = answers.judgments[f.field_id];
-  if (!j || needsStatementConfirmation(f)) return false;
+  if (!j || needsStatementConfirmation(f) || needsWorksheetConfirmation(f)) return false;
   if (f.require_true && j.value !== true) return false;
   if ((f.numeric_verification_values || []).includes(j.value) &&
       bundle.form.some((q) => (q.numeric_span_id || q.atom) && q.subject_id === f.subject_id &&
@@ -1248,7 +1251,31 @@ function fieldCalculation(f) {
   return {subject: {kind: isReference(f.subject_id) ? "reference" : "claim", id: f.subject_id},
     calculation: item.calculation};
 }
+function needsWorksheetConfirmation(f) {
+  return ["recomputed_matches", "recomputed_differs"].includes(answers.judgments[f.field_id]?.value) &&
+    fieldCalculation(f) && !linkedWorksheet(fieldCalculation(f));
+}
+function linkedWorksheet(supplied) {
+  return supplied && (answers.worksheets || []).find((w) =>
+    w.subject?.kind === supplied.subject.kind && w.subject?.id === supplied.subject.id);
+}
+function proposedWorksheet(supplied) {
+  if (!supplied) return null;
+  const draft = newWorksheet(supplied.subject, supplied.calculation);
+  // Nested/unsourced inputs need an explicit reviewer method, not invented provenance.
+  for (const operand of draft.operands) {
+    const original = supplied.calculation.operands.find((o) => o.name === operand.name);
+    const receipt = original?.citation && proposedReceipt(original.citation, supplied.subject.id);
+    if (original?.calculation || !receipt || !operand.value) return null;
+    operand.selections = [receipt];
+  }
+  draft.rationale = "Confirmed supplied formula, input values and proposed source passages by selecting a recomputation judgment.";
+  return draft;
+}
 function fieldControl(f, div) {
+  const supplied = fieldCalculation(f);
+  const proposal = proposedWorksheet(supplied);
+  const recomputation = (value) => ["recomputed_matches", "recomputed_differs"].includes(value);
   let control;
   if (f.kind === "boolean" && !f.require_true) {
     control = el("select");
@@ -1266,6 +1293,11 @@ function fieldControl(f, div) {
       // Keep the saved judgment, but give its pending evidence confirmation a distinct
       // display state so one genuine selection of supported records the receipts.
       control.options[0].textContent = "Supported saved — confirm evidence";
+      control.options[0].disabled = true;
+      control.value = "";
+    }
+    if (needsWorksheetConfirmation(f)) {
+      control.options[0].textContent = proposal ? "Recomputation saved — confirm worksheet" : "Recomputation saved — worksheet required";
       control.options[0].disabled = true;
       control.value = "";
     }
@@ -1307,6 +1339,11 @@ function fieldControl(f, div) {
     if (groupedItemMode() && f.subject_id) activateItem(f.field_id);
     if (value === "") delete answers.judgments[f.field_id];
     else judgment(f.field_id).value = value;
+    if (proposal && recomputation(value) && !linkedWorksheet(supplied)) {
+      (answers.worksheets ||= []).push(proposal);
+      renderForms();
+      renderWorksheets();
+    }
     if (confirmsStatement(f) && value === "supported") {
       const j = judgment(f.field_id);
       for (const c of judgmentCitations(f)) {
@@ -1315,6 +1352,8 @@ function fieldControl(f, div) {
       }
       renderForms();
     }
+    // Rerendering replaces the select; keep keyboard navigation at this judgment.
+    if (!control.isConnected) document.getElementById(control.id)?.focus({preventScroll: true});
     save();
     progress();
   };
@@ -1342,9 +1381,25 @@ function fieldControl(f, div) {
         renderForms(); save();
       }, confirmsStatement(f));
   }
-  const supplied = fieldCalculation(f);
   if (supplied) {
-    div.append(el("p", "A worksheet starts from the supplied formula and inputs. Check its passages and edit the draft before choosing a recomputation judgment."));
+    const preview = el("section");
+    preview.setAttribute("role", "group");
+    preview.setAttribute("aria-label", "Proposed calculation worksheet");
+    preview.append(el("h4", "Proposed calculation worksheet"));
+    calculationTechnical(supplied.calculation, preview);
+    for (const o of supplied.calculation.operands.filter((o) => o.kind !== "constant")) {
+      preview.append(el("p", `${o.name}: ${o.value} ${o.unit} · ${o.period || "period unspecified"} · ${o.entity || ""} · ${o.metric || ""}`));
+      const receipt = o.citation && proposedReceipt(o.citation, supplied.subject.id);
+      preview.append(el("p", receipt
+        ? `${receipt.source_id} L${receipt.start_line}–L${receipt.end_line}: ${receipt.excerpt}`
+        : "No exact source passage supplied for this input. Prepare or edit a worksheet to record your method."));
+    }
+    preview.append(el("p", linkedWorksheet(supplied)
+      ? "Your linked worksheet is retained. Edit it below if your method changes; selecting a verdict does not replace it."
+      : proposal
+        ? "Check the formula, inputs and passages above. Selecting recomputed_matches or recomputed_differs confirms them together and records one linked worksheet. Arithmetic agreement alone does not establish source support. To use a different method, prepare and edit a draft first."
+        : "This calculation needs a reviewer worksheet: some inputs are nested or lack exact source passages. Prepare and edit the draft before choosing a recomputation judgment."));
+    div.append(preview);
     const prepare = el("button", "Use supplied calculation as draft worksheet");
     prepare.type = "button";
     prepare.onclick = () => {
@@ -1740,6 +1795,7 @@ function newWorksheet(subjectRef, from = null) {
 }
 function addWorksheet(subjectRef, from = null) {
   (answers.worksheets ||= []).push(newWorksheet(subjectRef, from));
+  renderForms();
   renderWorksheets();
   save();
   const all = document.querySelectorAll("#worksheets .worksheet");
@@ -1795,7 +1851,7 @@ function renderWorksheets() {
     pick.onchange = () => {
       const [kind, id] = pick.value.split("\u0000");
       w.subject = pick.value ? { kind, id } : null;
-      renderWorksheets(); save();
+      renderForms(); renderWorksheets(); save();
     };
     subjectLabel.append(pick); div.append(subjectLabel);
     const supplied = suppliedCalculation(w.subject);
@@ -1896,7 +1952,7 @@ function renderWorksheets() {
     const remove = el("button", "Remove worksheet");
     remove.type = "button";
     remove.setAttribute("aria-label", `Remove worksheet ${n}`);
-    remove.onclick = () => { answers.worksheets.splice(i, 1); renderWorksheets(); save(); };
+    remove.onclick = () => { answers.worksheets.splice(i, 1); renderForms(); renderWorksheets(); save(); };
     div.append(remove);
     box.append(div);
   });

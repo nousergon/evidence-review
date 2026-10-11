@@ -21,56 +21,48 @@ def passage_bundle():
                  claims, sources=[source(text)], form=form, bundle_id="confirm-passages")
 
 
-def test_proposed_passage_is_explicit_correct_subject_durable_and_removable(tmp_path):
-    """Wrong subject, automatic attachment/verdict, mutated excerpts and lost receipts all fail here."""
+def test_supported_confirms_all_statement_passages_in_one_saved_action(tmp_path):
     b = passage_bundle()
+    b.form[0].evidence_required = False  # Consumer-owned conditional requirement, like existing bundles.
+    b.claims[0].citations.append(located(3, "review rule"))
+    b = type(b).model_validate(b.model_dump(mode="json"))
     store = FileStore(tmp_path)
+    store.register(b)
+    store.save_snapshot(b, 0, "old-answer", {"judgments": {"support:fees": {"value": "supported"}}}, "Synthetic reviewer", 0)
     with open_review(b, store, launch=False, presentation_mode="atomic-source-check/v1") as h, sync_playwright() as pw:
         browser = pw.chromium.launch()
         page = browser.new_page()
         page.goto(h.url)
         expect(page.locator("#status")).to_contain_text("Saved locally")
-        page.get_by_label("Assessor", exact=True).fill("Synthetic reviewer")
         item = page.get_by_label("Current item")
         passage = item.get_by_role("group", name="Proposed source passages")
-        expect(passage).to_contain_text("Synthetic filing")
-        expect(passage).to_contain_text("L2–L2")
-        expect(passage).to_contain_text("Refunds exclude service fees.")
-        assert not store.load_task(b.bundle_id)["answers"]["judgments"]
-        passage.get_by_role("button", name="View source passage", exact=True).click()
-        expect(page.locator("#viewer .target-hit")).to_contain_text("Refunds exclude service fees.")
-        assert not store.load_task(b.bundle_id)["answers"]["judgments"]
-        passage.get_by_role("button", name="Confirm checked passage", exact=True).click()
+        expect(passage.get_by_role("button", name="Confirm checked passage", exact=True)).to_have_count(0)
+        assert not store.load_task(b.bundle_id)["answers"]["judgments"]["support:fees"]["selections"]
         expect(item.get_by_label("Support: fees", exact=True)).to_have_value("")
-        expect(page.locator("#status")).to_contain_text("revision 1")
-        expect(page.locator("#status")).to_contain_text("0/3 fields answered")
-        expected = {"source_id": "filing", "source_hash": b.sources[0].sha256, "start_line": 2, "end_line": 2,
-                    "excerpt": "Refunds exclude service fees.", "subject_id": "fees"}
-        assert store.load_task(b.bundle_id)["answers"]["judgments"]["support:fees"]["selections"] == [expected]
-        expect(passage.get_by_role("button", name="Passage confirmed", exact=True)).to_be_disabled()
+        page.get_by_role("button", name="Submit review", exact=True).click()
+        expect(page.locator("#status")).to_contain_text("confirm the proposed evidence")
+        assert store.load_task(b.bundle_id)["last_submission"] is None
+        passage.get_by_role("button", name="View source passage", exact=True).first.click()
+        assert not store.load_task(b.bundle_id)["answers"]["judgments"]["support:fees"]["selections"]
         item.get_by_label("Support: fees", exact=True).select_option("supported")
         expect(page.locator("#status")).to_contain_text("revision 2")
+        saved = store.load_task(b.bundle_id)["answers"]["judgments"]["support:fees"]
+        assert saved["value"] == "supported"
+        assert [(s["start_line"], s["subject_id"]) for s in saved["selections"]] == [(2, "fees"), (3, "fees")]
+        assert saved["selections"][0]["excerpt"] == "Refunds exclude service fees."
         page.reload()
-        page.get_by_role("button", name="1. Support: fees · answered", exact=False).click()
+        page.get_by_role("button", name="1. Support: fees", exact=False).click()
         expect(item.get_by_label("Support: fees", exact=True)).to_have_value("supported")
-        expect(item.get_by_role("button", name="Passage confirmed", exact=True)).to_be_disabled()
-        item.get_by_role("button", name="Remove passage", exact=True).click()
-        expect(item.get_by_role("button", name="Confirm checked passage", exact=True)).to_be_enabled()
-        expect(page.locator("#status")).to_contain_text("revision 3")
-        item.get_by_role("button", name="Confirm checked passage", exact=True).click()
-        expect(page.locator("#status")).to_contain_text("revision 4")
-        assert store.load_task(b.bundle_id)["answers"]["judgments"]["support:fees"]["selections"] == [expected]
+        item.get_by_label("Support: fees", exact=True).select_option("supported")
+        assert len(store.load_task(b.bundle_id)["answers"]["judgments"]["support:fees"]["selections"]) == 2
         item.get_by_role("button", name="Next unanswered item", exact=True).click()
-        expect(item).to_contain_text("The review rule is separate.")
-        item.get_by_role("button", name="Confirm checked passage", exact=True).click()
+        item.get_by_label("Support: review", exact=True).select_option("cannot determine")
+        expect(page.locator("#status")).to_contain_text("revision 4")
+        assert not store.load_task(b.bundle_id)["answers"]["judgments"]["support:review"]["selections"]
         item.get_by_label("Support: review", exact=True).select_option("supported")
         page.get_by_label("Full review complete", exact=True).check()
         page.get_by_role("button", name="Submit review", exact=True).click()
         expect(page.locator("#continuation")).to_contain_text("Continuation succeeded")
-        saved = store.load_task(b.bundle_id)["answers"]["judgments"]
-        assert saved["support:review"]["selections"][0]["subject_id"] == "review"
-        assert saved["support:review"]["selections"][0]["excerpt"] == "A separate review rule applies."
-        assert saved["support:fees"]["selections"] == [expected]
         browser.close()
 
 
@@ -87,6 +79,12 @@ def test_missing_citations_offer_manual_review_without_a_confirmable_guess(tmp_p
         expect(item.get_by_role("group", name="Proposed source passages")).to_contain_text("No exact citation was supplied")
         expect(item.get_by_role("button", name="Confirm checked passage", exact=True)).to_have_count(0)
         expect(item.get_by_role("button", name="Attach selected source passage", exact=True)).to_be_visible()
+        page.get_by_label("Assessor", exact=True).fill("Synthetic reviewer")
+        item.get_by_label("Support: fees", exact=True).select_option("supported")
+        expect(page.locator("#status")).to_contain_text("revision 1")
+        saved = FileStore(tmp_path).load_task(b.bundle_id)["answers"]["judgments"]["support:fees"]
+        assert not saved["selections"]
+        expect(page.get_by_label("Review progress")).to_contain_text("0 of 3 required fields complete")
         browser.close()
 
 def test_current_calculation_prepares_one_linked_draft_with_named_constants(tmp_path):

@@ -352,3 +352,8 @@ mark.cited-words { background: #fff0bc; text-decoration: underline; text-decorat
 .candidate-passage { margin: .5rem 0; padding: .75rem; border: 1px solid #ccd7e0; border-radius: 4px; background: #f5f7fa; }
 .candidate-passage blockquote { margin: .5rem 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .candidate-passage small { display: block; overflow-wrap: anywhere; }
+
+.item-atoms { margin: .7rem 0; border-left: 3px solid #c7d6e5; padding-left: .7rem; }
+.item-judgment { border-top: 1px solid #d3dde5; padding-top: .5rem; }
+.field-error { color: #9f2323; font-weight: 600; }
+[aria-invalid="true"] { border: 2px solid #9f2323; }

@@ -45,11 +45,12 @@ function el(tag, text) {
 }
 // Expansion is presentation-only, scoped to this bundle and tab, never a judgment.
 function stepKey(key) { return "review-step:" + bundle.bundle_id + ":" + key; }
-function reviewStep(key, title) {
+function reviewStep(key, title, defaultOpen = true) {
   const section = el("details");
   section.className = "review-step";
   section.dataset.stepKey = stepKey(key);
-  section.open = tabStore.get(stepKey(key)) !== "closed";
+  const saved = tabStore.get(stepKey(key));
+  section.open = saved === null ? defaultOpen : saved !== "closed";
   const summary = el("summary");
   summary.append(el("h3", title));
   // Click (including keyboard activation) precedes native toggle and navigation/reload.
@@ -1031,6 +1032,22 @@ function followSubject(id) {
     revealControl($("field-" + f.field_id));
   }
 }
+function groupedItemMode() { return atomicMode() && bundle.task_kind !== "reference"; }
+function activateItem(fieldId) {
+  current = fieldId;
+  const subjectId = bundle.form.find((f) => f.field_id === fieldId)?.subject_id;
+  document.querySelectorAll("#items > details.item").forEach((node) => {
+    const selected = node.dataset.itemSubject === subjectId;
+    node.classList.toggle("current", selected);
+    if (selected) node.setAttribute("aria-label", "Current item");
+    else node.removeAttribute("aria-label");
+    const nav = node.querySelector(".item-nav");
+    if (nav) nav.hidden = !selected;
+    const next = node.querySelector("[data-next-item]");
+    if (next) { if (selected) next.id = "next-item"; else next.removeAttribute("id"); }
+  });
+  progress();
+}
 function goTo(fieldId, focus = true) {
   current = fieldId;
   const f = bundle.form.find((x) => x.field_id === fieldId);
@@ -1241,6 +1258,7 @@ function fieldControl(f, div) {
             ? ""
             : control.value === "true"
         : control.value;
+    if (groupedItemMode() && f.subject_id) activateItem(f.field_id);
     if (value === "") delete answers.judgments[f.field_id];
     else judgment(f.field_id).value = value;
     if (confirmsStatement(f) && value === "supported") {
@@ -1354,10 +1372,16 @@ function progress() {
   });
 
   quantityProgress();
+  document.querySelectorAll("[data-item-status]").forEach((node) => {
+    const fields = itemFields().filter((f) => f.subject_id === node.dataset.itemStatus && f.required);
+    node.textContent = !fields.length ? " · optional" : fields.every(answered) ? " · answered"
+      : fields.some((f) => answers.judgments[f.field_id]?.value) ? " · in progress" : " · not reviewed";
+  });
   const required = bundle.form.filter((f) => f.required);
   const done = required.filter(answered).length;
   const items = itemFields();
-  const at = items.findIndex((f) => f.field_id === current);
+  const positions = groupedItemMode() ? [...new Set(items.map((f) => f.subject_id))] : items.map((f) => f.field_id);
+  const at = positions.indexOf(groupedItemMode() ? items.find((f) => f.field_id === current)?.subject_id : current);
   const next = nextUnanswered();
   const judgments = required.filter((f) => !(f.kind === "boolean" && f.require_true));
   const optional = bundle.form.filter((f) => !f.required).length;
@@ -1368,7 +1392,7 @@ function progress() {
     `${done} of ${required.length} required fields complete` +
     (requiredFieldsOnly() ? "" : ` · ${optional} optional field${optional === 1 ? "" : "s"}`) +
     ` · ${technical} completion control${technical === 1 ? "" : "s"}` +
-    (at >= 0 ? ` · item ${at + 1} of ${items.length}` : "") +
+    (at >= 0 ? ` · item ${at + 1} of ${positions.length}` : "") +
     (next ? ` · next unanswered: ${next.label}` : items.length ? " · required items answered; finish below" : "");
   const field = bundle.form.find((f) => f.field_id === current);
   const j = field && answers.judgments[field.field_id];
@@ -1433,24 +1457,22 @@ function renderForms() {
   $("item-links").replaceChildren();
   claimLinks(bundle.form.find((f) => f.field_id === current));
   $("items").replaceChildren();
-  const grouped = atomicMode() && bundle.task_kind !== "reference";
+  const grouped = groupedItemMode();
+  if (grouped) $("item-navigation").hidden = true;
   const currentSubject = items.find((f) => f.field_id === current)?.subject_id;
-  const seenSubjects = new Set();
-  items.forEach((f, i) => {
-    if (grouped) {
-      if (f.subject_id === currentSubject && f.field_id !== current) return;
-      if (seenSubjects.has(f.subject_id)) return;
-      seenSubjects.add(f.subject_id);
-    }
+  const displayed = grouped
+    ? items.filter((f, i) => items.findIndex((q) => q.subject_id === f.subject_id) === i) : items;
+  displayed.forEach((f, i) => {
+    const isCurrent = grouped ? f.subject_id === currentSubject : f.field_id === current;
     const item = subjectOf(f);
-    const div = f.field_id === current
-      ? reviewStep("item:" + f.subject_id, `Item ${i + 1} of ${items.length}: ${f.label}`)
+    const div = grouped || isCurrent
+      ? reviewStep("item:" + f.subject_id, `Item ${i + 1} of ${displayed.length}: ${f.label}`, isCurrent)
       : el("div");
     div.classList.add("item");
     if (answered(f)) div.classList.add("answered");
     div.dataset.itemSubject = f.subject_id;
     const related = grouped ? items.filter((q) => q.subject_id === f.subject_id) : [f];
-    if (f.field_id !== current) {
+    if (!grouped && !isCurrent) {
       const j = answers.judgments[f.field_id];
       const saved = j && j.value !== "";
       const pending = j && f.note_required_unless.length && !f.note_required_unless.includes(j.value) && !j.note.trim()
@@ -1466,8 +1488,16 @@ function renderForms() {
       $("item-links").append(div);
       return;
     }
-    div.classList.add("current");
-    div.setAttribute("aria-label", "Current item");
+    if (isCurrent) {
+      div.classList.add("current");
+      div.setAttribute("aria-label", "Current item");
+    }
+    if (grouped) {
+      const heading = div.querySelector(":scope > summary");
+      const state = el("small"); state.dataset.itemStatus = f.subject_id;
+      heading.append(state);
+      heading.addEventListener("click", () => { if (!div.open) activateItem(f.field_id); });
+    }
     if (item) {
       div.append(el("p", isReference(f.subject_id) ? "Reference item:" : "Statement under review:"));
       div.append(linkedStatement(item.text, f.subject_id));
@@ -1496,11 +1526,13 @@ function renderForms() {
     });
     const nav = el("div");
     nav.className = "item-nav";
+    nav.hidden = !isCurrent;
     const prev = el("button", "Previous item");
     prev.disabled = i === 0;
-    prev.onclick = () => goTo(items[i - 1].field_id);
+    prev.onclick = () => goTo(displayed[i - 1].field_id);
     const next = el("button", "Next unanswered item");
-    next.id = "next-item";
+    next.dataset.nextItem = "true";
+    if (isCurrent) next.id = "next-item";
     next.onclick = () => {
       const target = nextUnanswered();
       if (target) goTo(target.field_id);
@@ -2541,10 +2573,11 @@ function renderAtomRows() {
   const hosts = new Map();
   if (bundle.task_kind !== "reference") {
     document.querySelectorAll("[data-item-subject]").forEach((host) => {
-      const group = el(host.classList.contains("current") ? "div" : "details");
+      const inline = host.tagName === "DETAILS" || host.classList.contains("current");
+      const group = el(inline ? "div" : "details");
       group.className = "item-atoms";
       group.setAttribute("aria-label", "Source checks for " + host.dataset.itemSubject);
-      group.append(el(host.classList.contains("current") ? "h4" : "summary", "Source checks for this item"));
+      group.append(el(inline ? "h4" : "summary", "Source checks for this item"));
       const controls = host.querySelector(".item-judgment");
       if (controls) controls.before(group); else host.append(group);
       hosts.set(host.dataset.itemSubject, group);

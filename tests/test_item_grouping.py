@@ -133,3 +133,36 @@ def test_review_steps_collapse_without_changing_answers_and_reopen_for_navigatio
         expect(intro).to_be_visible()
         expect(intro).to_be_focused()
         browser.close()
+
+
+def test_every_item_has_a_consecutive_independent_disclosure(tmp_path):
+    b = grouped_bundle()
+    store = FileStore(tmp_path)
+    with open_review(b, store, launch=False, presentation_mode="atomic-source-check/v1") as h, sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.goto(h.url)
+        expect(page.locator("#status")).to_contain_text("Saved locally")
+        groups = page.locator("#items > details.item")
+        expect(groups).to_have_count(2)
+        expect(groups.nth(0).locator(":scope > summary")).to_contain_text("Item 1 of 2:")
+        expect(groups.nth(1).locator(":scope > summary")).to_contain_text("Item 2 of 2:")
+        expect(page.locator("#item-navigation")).to_be_hidden()
+        before = store.load_task(b.bundle_id)["answers"]
+        groups.nth(1).locator(":scope > summary").click()
+        expect(groups.nth(0).get_by_label("Support: margin", exact=True)).to_be_visible()
+        expect(groups.nth(1).get_by_label("Support: revenue", exact=True)).to_be_visible()
+        expect(groups.nth(1).locator("[data-atom-row]")).to_contain_text("1,150")
+        groups.nth(0).locator(":scope > summary").click()
+        expect(groups.nth(0).get_by_label("Support: margin", exact=True)).to_be_hidden()
+        expect(groups.nth(1).get_by_label("Support: revenue", exact=True)).to_be_visible()
+        groups.nth(1).locator(":scope > summary").click()
+        page.reload()
+        expect(page.locator("#status")).to_contain_text("Saved locally")
+        expect(groups.nth(0).get_by_label("Support: margin", exact=True)).to_be_hidden()
+        expect(groups.nth(1).get_by_label("Support: revenue", exact=True)).to_be_hidden()
+        assert store.load_task(b.bundle_id)["answers"] == before
+        page.get_by_role("region", name="Report").get_by_role("button", name="1,150: go to its check row", exact=False).click()
+        expect(groups.nth(1).get_by_label("Support: revenue", exact=True)).to_be_visible()
+        expect(page.locator("#progress")).to_contain_text("item 2 of 2")
+        browser.close()

@@ -51,9 +51,9 @@ def test_supported_confirms_all_statement_passages_in_one_saved_action(tmp_path)
         assert [(s["start_line"], s["subject_id"]) for s in saved["selections"]] == [(2, "fees"), (3, "fees")]
         assert saved["selections"][0]["excerpt"] == "Refunds exclude service fees."
         page.reload()
-        page.get_by_role("button", name="1. Support: fees", exact=False).click()
-        expect(item.get_by_label("Support: fees", exact=True)).to_have_value("supported")
-        item.get_by_label("Support: fees", exact=True).select_option("supported")
+        fees = page.locator('[data-item-subject="fees"]')
+        expect(fees.get_by_label("Support: fees", exact=True)).to_have_value("supported")
+        fees.get_by_label("Support: fees", exact=True).select_option("supported")
         assert len(store.load_task(b.bundle_id)["answers"]["judgments"]["support:fees"]["selections"]) == 2
         item.get_by_role("button", name="Next unanswered item", exact=True).click()
         item.get_by_label("Support: review", exact=True).select_option("cannot determine")

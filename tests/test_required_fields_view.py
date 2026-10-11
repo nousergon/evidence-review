@@ -70,7 +70,7 @@ def test_required_view_counts_only_visible_work_and_preserves_hidden_answers(tmp
             expect(page.locator("#item-links button")).to_have_count(0)
             expect(page.get_by_label("Optional context", exact=True)).to_have_count(0)
         else:
-            expect(page.locator("#status")).to_contain_text("2/31 fields answered")
+            expect(page.locator("#status")).to_contain_text("1/31 fields answered")  # An unfinished diagnostic is saved, not answered.
             expect(page.locator("#progress")).to_contain_text("29 optional fields")
             expect(page.locator("#item-links button")).to_have_count(28)
             expect(page.get_by_label("Optional context", exact=True)).to_have_value("Preserve saved optional context")

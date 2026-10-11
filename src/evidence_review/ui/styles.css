@@ -346,3 +346,20 @@ mark.cited-words { background: #fff0bc; text-decoration: underline; text-decorat
 .choice-group { display: flex; flex-direction: column; gap: .15rem; margin: .3rem 0; }
 .choice-group > label { display: block; }
 .choice-group[hidden] { display: none; }
+
+.candidate-passages { margin: 1rem 0; }
+.candidate-passages h4, .candidate-passage h5 { margin: .5rem 0; }
+.candidate-passage { margin: .5rem 0; padding: .75rem; border: 1px solid #ccd7e0; border-radius: 4px; background: #f5f7fa; }
+.candidate-passage blockquote { margin: .5rem 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.candidate-passage small { display: block; overflow-wrap: anywhere; }
+
+.item-atoms { margin: .7rem 0; border-left: 3px solid #c7d6e5; padding-left: .7rem; }
+.item-judgment { border-top: 1px solid #d3dde5; padding-top: .5rem; }
+.field-error { color: #9f2323; font-weight: 600; }
+[aria-invalid="true"] { border: 2px solid #9f2323; }
+
+/* Native disclosures keep compact headings keyboard-operable without hiding saved work. */
+.review-step { margin: .6rem 0; border: 1px solid #ccd7e0; border-radius: 4px; padding: .5rem; }
+.review-step > summary { cursor: pointer; }
+.review-step > summary h3 { display: inline; font-size: 1rem; }
+.review-step > summary:focus-visible { outline: 2px solid #245c91; outline-offset: 3px; }

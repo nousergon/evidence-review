@@ -29,3 +29,9 @@ Independent review hides machine labels and producing-system identities; no sema
 
 ## Acceptance
 Synthetic unsupported facts, omitted prose numbers, wrong unit/period, missing operand/source, duplicate quantities, bps/ranges/negative amounts, table footnotes and failed reports remain inspectable. Browser tests prove evidence navigation, save/reload/amend/submit without JSON/path copying; blinding, injection, concurrency, crash and callback failures have regression coverage. No claim of accuracy/coverage/performance without measured evidence. The project uses MIT. Package/license inclusion and release verification apply before a distributable release.
+
+## Statement confirmation and grouped review (0.6.5)
+
+For non-reference statement choice fields offering supported, selecting that verdict explicitly confirms the displayed exact frozen passage proposals and saves their receipts with the verdict. Navigation and loading never confirm. Existing supported answers without receipts are preserved and prompted for one explicit supported selection. Missing or ambiguous evidence produces no invented receipt. Reference judgments keep their quantity-check contract.
+
+In atomic statement review, source rows and related judgment controls are grouped by subject; shared rows have one owner and retain all bindings. Clicking an atom in the report opens its owning item. Whole-answer questions appear after the item checks, retaining caller form order within their groups. All items and standalone questions use native keyboard-accessible disclosures; expansion state is scoped to the bundle and tab, remains separate from judgments, and survives rerenders/reloads. Explicit navigation and validation reopen relevant sections. Submission errors name and focus incomplete questions; all existing judgments and immutable submissions are preserved.

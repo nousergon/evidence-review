@@ -43,6 +43,31 @@ function el(tag, text) {
   if (text !== undefined) n.textContent = text;
   return n;
 }
+// Expansion is presentation-only, scoped to this bundle and tab, never a judgment.
+function stepKey(key) { return "review-step:" + bundle.bundle_id + ":" + key; }
+function reviewStep(key, title, defaultOpen = true) {
+  const section = el("details");
+  section.className = "review-step";
+  section.dataset.stepKey = stepKey(key);
+  const saved = tabStore.get(stepKey(key));
+  section.open = saved === null ? defaultOpen : saved !== "closed";
+  const summary = el("summary");
+  summary.append(el("h3", title));
+  // Click (including keyboard activation) precedes native toggle and navigation/reload.
+  summary.onclick = () => tabStore.set(stepKey(key), section.open ? "closed" : "open");
+  section.append(summary);
+  section.ontoggle = () => {
+    if (section.isConnected) tabStore.set(stepKey(key), section.open ? "open" : "closed");
+  };
+  return section;
+}
+function revealControl(control) {
+  let ancestor = control?.parentElement;
+  while (ancestor) {
+    if (ancestor.tagName === "DETAILS") ancestor.open = true;
+    ancestor = ancestor.parentElement;
+  }
+}
 // Source-of-truth map for answer annotation: every DOM text node that carries original answer
 // text is registered here with its field and the code-point offset it starts at. Anything else
 // inside an answer host (calculation cards, diagnostics, quantity checkboxes, preview buttons,
@@ -138,7 +163,7 @@ function presentationFields() {
 }
 function status() {
   const fields = requiredFieldsOnly() ? bundle.form.filter((f) => f.required) : bundle.form;
-  const completed = fields.filter((f) => Object.hasOwn(answers.judgments, f.field_id)).length;
+  const completed = fields.filter((f) => answers.judgments[f.field_id] && answers.judgments[f.field_id].value !== "").length;
   const hook = state.hook;
   $("status").className = "";
   $("status").textContent =
@@ -305,6 +330,12 @@ function attachReferenceEvidenceReceipts() {
   }
 }
 function save(submit = false) {
+  if (submit && bundle.form.some(needsStatementConfirmation)) {
+    showSubmissionBlockers();
+    $("status").className = "save-error";
+    $("status").textContent = "Not submitted: select supported to confirm the proposed evidence for each previously supported statement.";
+    return Promise.resolve();
+  }
   attachReferenceEvidenceReceipts();
   const snapshot = structuredClone(answers);
   const elapsed = active;
@@ -362,7 +393,7 @@ function save(submit = false) {
         $("status").className = "save-error";
         $("status").textContent =
           (submit ? "Not submitted: " : "Not saved: ") +
-          err.message +
+          readableValidation(err.message) +
           (conflicted
             ? " · reload to reconcile before continuing."
             : " · correct the fields and save again.");
@@ -965,7 +996,7 @@ function isReference(id) {
 }
 function answered(f) {
   const j = answers.judgments[f.field_id];
-  if (!j) return false;
+  if (!j || needsStatementConfirmation(f)) return false;
   if (f.require_true && j.value !== true) return false;
   if ((f.numeric_verification_values || []).includes(j.value) &&
       bundle.form.some((q) => (q.numeric_span_id || q.atom) && q.subject_id === f.subject_id &&
@@ -995,18 +1026,37 @@ function nextUnanswered() {
 // Opening a statement from the report also makes its decision the current item.
 function followSubject(id) {
   const f = itemFields().find((x) => x.subject_id === id);
-  if (f && f.field_id !== current) {
-    current = f.field_id;
-    renderForms();
+  if (f) {
+    tabStore.set(stepKey("item:" + f.subject_id), "open");
+    if (f.field_id !== current) { current = f.field_id; renderForms(); }
+    revealControl($("field-" + f.field_id));
   }
+}
+function groupedItemMode() { return atomicMode() && bundle.task_kind !== "reference"; }
+function activateItem(fieldId) {
+  current = fieldId;
+  const subjectId = bundle.form.find((f) => f.field_id === fieldId)?.subject_id;
+  document.querySelectorAll("#items > details.item").forEach((node) => {
+    const selected = node.dataset.itemSubject === subjectId;
+    node.classList.toggle("current", selected);
+    if (selected) node.setAttribute("aria-label", "Current item");
+    else node.removeAttribute("aria-label");
+    const nav = node.querySelector(".item-nav");
+    if (nav) nav.hidden = !selected;
+    const next = node.querySelector("[data-next-item]");
+    if (next) { if (selected) next.id = "next-item"; else next.removeAttribute("id"); }
+  });
+  progress();
 }
 function goTo(fieldId, focus = true) {
   current = fieldId;
   const f = bundle.form.find((x) => x.field_id === fieldId);
   const item = f && subjectOf(f);
+  if (f) tabStore.set(stepKey("item:" + f.subject_id), "open");
   if (item && bundle.task_kind !== "reference") showSubject(item, f.subject_id, false);
   if (bundle.task_kind === "reference") referenceEvidenceList(f?.subject_id);
   renderForms();
+  revealControl($("field-" + fieldId));
   if (focus) $("field-" + fieldId)?.focus();
 }
 function claimLinks(f) {
@@ -1037,6 +1087,131 @@ function claimLinks(f) {
     }
   });
 }
+function confirmsStatement(f) {
+  return bundle.task_kind !== "reference" && !isReference(f.subject_id) && f.kind === "choice" && f.subject_id &&
+    !f.numeric_span_id && !f.atom && f.options.includes("supported");
+}
+function needsStatementConfirmation(f) {
+  return confirmsStatement(f) && answers.judgments[f.field_id]?.value === "supported" &&
+    !answers.judgments[f.field_id]?.selections?.length;
+}
+function samePassage(a, b) {
+  return a.source_id === b.source_id && a.source_hash === b.source_hash &&
+    a.start_line === b.start_line && a.end_line === b.end_line && a.subject_id === b.subject_id;
+}
+function calculationCitations(calculation) {
+  return (calculation?.operands || []).flatMap((o) =>
+    [...(o.citation ? [o.citation] : []), ...calculationCitations(o.calculation)]);
+}
+function judgmentCitations(f) {
+  const item = subjectOf(f);
+  const citations = [...(item?.citations || []), ...calculationCitations(item?.calculation)];
+  for (const span of bundle.spans.filter((s) => s.claim_ids.includes(f.subject_id))) {
+    if (span.state === "ambiguous") {
+      citations.push({status: "ambiguous", reason: span.reason || "Several source candidates; none chosen"});
+      continue;
+    }
+    citations.push(...span.citations, ...calculationCitations(span.calculation));
+  }
+  return citations;
+}
+function proposedReceipt(c, subjectId) {
+  const source = bundle.sources.find((s) => s.source_id === c.source_id);
+  if (!source || c.status !== "located" || !Number.isInteger(c.start_line) ||
+      !Number.isInteger(c.end_line) || c.start_line < 1 || c.end_line < c.start_line) return null;
+  const view = evidence.views[c.source_id + ":" + c.start_line + ":" + c.end_line];
+  if (!view || typeof view.text !== "string") return null;
+  return {source_id: source.source_id, source_hash: source.sha256,
+    start_line: c.start_line, end_line: c.end_line, excerpt: view.text, subject_id: subjectId};
+}
+async function viewProposedPassage(c, receipt, origin) {
+  subject = receipt.subject_id;
+  selection = null;
+  $("evidence-panel").open = true;
+  if (!evidence.rendered_sources?.[receipt.source_id]) {
+    invalidateNavigation();
+    $("evidence").replaceChildren();
+    showSource(bundle.sources.find((s) => s.source_id === receipt.source_id), receipt.start_line, receipt.end_line);
+    return;
+  }
+  const generation = ++navigation, epoch = taskEpoch, bundleId = bundle.bundle_id, bundleHash = state.bundle_hash;
+  const viewer = $("viewer");
+  viewer.hidden = false;
+  viewerOrigin = origin;
+  viewer.replaceChildren(el("p", "Opening source…"));
+  try {
+    const data = await renderedSource(receipt.source_id).promise;
+    if (generation !== navigation || epoch !== taskEpoch || bundleId !== bundle.bundle_id || bundleHash !== state.bundle_hash) return;
+    const target = data.manifest.targets.find((t) => t.source_id === c.source_id &&
+      t.start_line === c.start_line && t.end_line === c.end_line && t.excerpt === c.excerpt);
+    if (target) await openTarget({...target, rendered: true}, origin, null);
+    else {
+      viewer.replaceChildren(el("p", "No rendered location for this passage; inspect the exact frozen lines below."));
+      $("evidence").replaceChildren();
+      showSource(bundle.sources.find((s) => s.source_id === receipt.source_id), receipt.start_line, receipt.end_line);
+    }
+  } catch (error) {
+    if (generation !== navigation || epoch !== taskEpoch || bundleHash !== state.bundle_hash) return;
+    viewer.replaceChildren(el("p", "Rendered source unavailable: " + error.message + ". Inspect the frozen lines below."));
+    $("evidence").replaceChildren();
+    showSource(bundle.sources.find((s) => s.source_id === receipt.source_id), receipt.start_line, receipt.end_line);
+  }
+}
+function renderCandidatePassages(box, citations, subjectId, selections, onConfirm, statement = false) {
+  const group = el("div");
+  group.className = "candidate-passages";
+  group.setAttribute("role", "group");
+  group.setAttribute("aria-label", "Proposed source passages");
+  group.append(el("h4", "Proposed source passages"),
+    el("p", statement ? "Choosing supported confirms this statement against all proposed passages below and attaches them in one action. You can inspect the sources before choosing." : "Inspect each passage against this item, then confirm the passages you checked. Confirmation attaches evidence; choose your judgment separately."));
+  const seen = new Set(), unresolved = new Set();
+  for (const c of citations) {
+    const receipt = proposedReceipt(c, subjectId);
+    if (!receipt) {
+      unresolved.add(c.reason || (c.status || "unresolved") + ": no exact frozen passage available");
+      continue;
+    }
+    const key = JSON.stringify([receipt.source_id, receipt.source_hash, receipt.start_line, receipt.end_line]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const source = bundle.sources.find((s) => s.source_id === receipt.source_id);
+    const card = el("div"); card.className = "candidate-passage";
+    card.append(el("h5", source.title + " · L" + receipt.start_line + "–L" + receipt.end_line),
+      el("blockquote", receipt.excerpt), el("small", "Frozen SHA-256: " + receipt.source_hash));
+    const view = el("button", "View source passage"); view.type = "button";
+    view.onclick = () => viewProposedPassage(c, receipt, view);
+    const confirmed = selections.some((s) => samePassage(s, receipt));
+    const confirm = el("button", confirmed ? "Passage confirmed" : "Confirm checked passage");
+    confirm.type = "button"; confirm.disabled = confirmed;
+    confirm.onclick = () => {
+      if (selections.some((s) => samePassage(s, receipt))) return;
+      onConfirm(structuredClone(receipt));
+    };
+    const controls = el("div");
+    controls.append(view);
+    if (statement) controls.append(el("span", confirmed ? "Attached to statement" : "Attached when you choose supported"));
+    else controls.append(confirm);
+    card.append(controls);
+    group.append(card);
+  }
+  if (!seen.size) group.append(el("p", "No exact passage is proposed. Search or select frozen source lines manually; missing or ambiguous evidence remains unresolved."));
+  unresolved.forEach((reason) => group.append(el("p", "Unresolved source: " + reason)));
+  box.append(group);
+  return group;
+}
+function fieldCalculation(f) {
+  if (f.field_id.startsWith("calc:")) {
+    const id = f.field_id.slice(5);
+    const span = bundle.spans.find((s) => s.span_id === id);
+    if (span?.calculation) return {subject: {kind: "span", id}, calculation: span.calculation};
+    const claim = bundle.claims.find((c) => c.claim_id === id);
+    if (claim?.calculation) return {subject: {kind: "claim", id}, calculation: claim.calculation};
+  }
+  const item = subjectOf(f);
+  if (!item?.calculation) return null;
+  return {subject: {kind: isReference(f.subject_id) ? "reference" : "claim", id: f.subject_id},
+    calculation: item.calculation};
+}
 function fieldControl(f, div) {
   let control;
   if (f.kind === "boolean" && !f.require_true) {
@@ -1049,6 +1224,10 @@ function fieldControl(f, div) {
     control.append(new Option("Choose…", ""));
     f.options.forEach((v) => control.append(new Option(v, v)));
     control.value = answers.judgments[f.field_id]?.value || "";
+    if (needsStatementConfirmation(f)) {
+      control.options[0].textContent = "Previously supported — select supported to confirm evidence";
+      control.value = "";
+    }
   } else {
     control = el("input");
     control.type = f.kind === "boolean" ? "checkbox" : "text";
@@ -1079,8 +1258,17 @@ function fieldControl(f, div) {
             ? ""
             : control.value === "true"
         : control.value;
+    if (groupedItemMode() && f.subject_id) activateItem(f.field_id);
     if (value === "") delete answers.judgments[f.field_id];
     else judgment(f.field_id).value = value;
+    if (confirmsStatement(f) && value === "supported") {
+      const j = judgment(f.field_id);
+      for (const c of judgmentCitations(f)) {
+        const receipt = proposedReceipt(c, f.subject_id);
+        if (receipt && !j.selections.some((s) => samePassage(s, receipt))) j.selections.push(receipt);
+      }
+      renderForms();
+    }
     save();
     progress();
   };
@@ -1100,13 +1288,38 @@ function fieldControl(f, div) {
     div.append(el("p", "Select the claims that address this issue in the report pane."));
   if (bundle.task_kind === "reference")
     div.append(el("p", "Source context is attached automatically for an explained correction or uncertainty. This does not verify it or check quantities. A verified verdict still requires every quantity checked. Additional passage attachments are optional."));
+  if (f.subject_id && !f.numeric_span_id && !f.atom) {
+    renderCandidatePassages(div, judgmentCitations(f), f.subject_id,
+      answers.judgments[f.field_id]?.selections || [], (receipt) => {
+        const j = judgment(f.field_id);
+        if (!j.selections.some((s) => samePassage(s, receipt))) j.selections.push(receipt);
+        renderForms(); save();
+      }, confirmsStatement(f));
+  }
+  const supplied = fieldCalculation(f);
+  if (supplied) {
+    div.append(el("p", "A worksheet starts from the supplied formula and inputs. Check its passages and edit the draft before choosing a recomputation judgment."));
+    const prepare = el("button", "Use supplied calculation as draft worksheet");
+    prepare.type = "button";
+    prepare.onclick = () => {
+      const existing = (answers.worksheets || []).find((w) =>
+        w.subject?.kind === supplied.subject.kind && w.subject?.id === supplied.subject.id);
+      if (existing) {
+        renderWorksheets();
+        document.querySelector('[data-worksheet="' + CSS.escape(existing.worksheet_id) + '"] input')?.focus();
+      } else addWorksheet(supplied.subject, supplied.calculation);
+    };
+    div.append(prepare);
+  }
   const attach = el("button", "Attach selected source passage");
   attach.onclick = () => {
     if (!selection) {
       $("status").textContent = "Select a passage first: open a source and click its first and last line.";
       return;
     }
-    judgment(f.field_id).selections.push(structuredClone(selection));
+    const receipt = {...structuredClone(selection), subject_id: f.subject_id || selection.subject_id};
+    const j = judgment(f.field_id);
+    if (!j.selections.some((s) => samePassage(s, receipt))) j.selections.push(receipt);
     renderForms();
     save();
   };
@@ -1159,10 +1372,16 @@ function progress() {
   });
 
   quantityProgress();
+  document.querySelectorAll("[data-item-status]").forEach((node) => {
+    const fields = itemFields().filter((f) => f.subject_id === node.dataset.itemStatus && f.required);
+    node.textContent = !fields.length ? " · optional" : fields.every(answered) ? " · answered"
+      : fields.some((f) => answers.judgments[f.field_id]?.value) ? " · in progress" : " · not reviewed";
+  });
   const required = bundle.form.filter((f) => f.required);
   const done = required.filter(answered).length;
   const items = itemFields();
-  const at = items.findIndex((f) => f.field_id === current);
+  const positions = groupedItemMode() ? [...new Set(items.map((f) => f.subject_id))] : items.map((f) => f.field_id);
+  const at = positions.indexOf(groupedItemMode() ? items.find((f) => f.field_id === current)?.subject_id : current);
   const next = nextUnanswered();
   const judgments = required.filter((f) => !(f.kind === "boolean" && f.require_true));
   const optional = bundle.form.filter((f) => !f.required).length;
@@ -1173,7 +1392,7 @@ function progress() {
     `${done} of ${required.length} required fields complete` +
     (requiredFieldsOnly() ? "" : ` · ${optional} optional field${optional === 1 ? "" : "s"}`) +
     ` · ${technical} completion control${technical === 1 ? "" : "s"}` +
-    (at >= 0 ? ` · item ${at + 1} of ${items.length}` : "") +
+    (at >= 0 ? ` · item ${at + 1} of ${positions.length}` : "") +
     (next ? ` · next unanswered: ${next.label}` : items.length ? " · required items answered; finish below" : "");
   const field = bundle.form.find((f) => f.field_id === current);
   const j = field && answers.judgments[field.field_id];
@@ -1183,6 +1402,27 @@ function progress() {
   if (missing.length) $("progress").textContent += " · Pending: " + missing.join(" and ");
   const button = $("next-item");
   if (button) button.textContent = next ? "Next unanswered item" : "Go to finish";
+}
+function readableValidation(message) {
+  for (const f of [...bundle.form].sort((a, b) => b.field_id.length - a.field_id.length))
+    message = message.replaceAll(": " + f.field_id, ": " + f.label);
+  return message;
+}
+function focusInvalidField(f) {
+  revealedFields.add(f.field_id);
+  if (f.subject_id) goTo(f.field_id, false);
+  else renderForms();
+  const control = $("field-" + f.field_id);
+  if (!control) return;
+  control.setAttribute("aria-invalid", "true");
+  const help = el("p", "Complete this question before submitting: " + f.label);
+  help.className = "field-error"; help.id = "error-" + f.field_id;
+  control.setAttribute("aria-describedby", help.id);
+  if (!$(help.id)) control.parentElement.after(help);
+  let ancestor = control.parentElement;
+  while (ancestor) { if (ancestor.tagName === "DETAILS") ancestor.open = true; ancestor = ancestor.parentElement; }
+  control.scrollIntoView({block: "center"});
+  control.focus({preventScroll: true});
 }
 function showSubmissionBlockers() {
   const box = $("submission-blockers");
@@ -1204,9 +1444,11 @@ function showSubmissionBlockers() {
     box.append(b);
   });
   box.hidden = !pending.length;
-  if (pending.length) box.scrollIntoView({ block: "nearest" });
+  if (pending.length) focusInvalidField(pending[0]);
 }
 function renderForms() {
+  document.querySelectorAll("[data-step-key]").forEach((section) =>
+    tabStore.set(section.dataset.stepKey, section.open ? "open" : "closed"));
   const items = itemFields();
   if (current === null || !items.some((f) => f.field_id === current))
     current = (items.find((f) => f.required && !answered(f)) || items.find((f) => f.required) || {}).field_id ?? null;
@@ -1215,11 +1457,22 @@ function renderForms() {
   $("item-links").replaceChildren();
   claimLinks(bundle.form.find((f) => f.field_id === current));
   $("items").replaceChildren();
-  items.forEach((f, i) => {
+  const grouped = groupedItemMode();
+  if (grouped) $("item-navigation").hidden = true;
+  const currentSubject = items.find((f) => f.field_id === current)?.subject_id;
+  const displayed = grouped
+    ? items.filter((f, i) => items.findIndex((q) => q.subject_id === f.subject_id) === i) : items;
+  displayed.forEach((f, i) => {
+    const isCurrent = grouped ? f.subject_id === currentSubject : f.field_id === current;
     const item = subjectOf(f);
-    const div = el("div");
-    div.className = "item" + (answered(f) ? " answered" : "");
-    if (f.field_id !== current) {
+    const div = grouped || isCurrent
+      ? reviewStep("item:" + f.subject_id, `Item ${i + 1} of ${displayed.length}: ${f.label}`, isCurrent)
+      : el("div");
+    div.classList.add("item");
+    if (answered(f)) div.classList.add("answered");
+    div.dataset.itemSubject = f.subject_id;
+    const related = grouped ? items.filter((q) => q.subject_id === f.subject_id) : [f];
+    if (!grouped && !isCurrent) {
       const j = answers.judgments[f.field_id];
       const saved = j && j.value !== "";
       const pending = j && f.note_required_unless.length && !f.note_required_unless.includes(j.value) && !j.note.trim()
@@ -1235,9 +1488,16 @@ function renderForms() {
       $("item-links").append(div);
       return;
     }
-    div.classList.add("current");
-    div.setAttribute("aria-label", "Current item");
-    div.append(el("h3", `Item ${i + 1} of ${items.length}: ${f.label}`));
+    if (isCurrent) {
+      div.classList.add("current");
+      div.setAttribute("aria-label", "Current item");
+    }
+    if (grouped) {
+      const heading = div.querySelector(":scope > summary");
+      const state = el("small"); state.dataset.itemStatus = f.subject_id;
+      heading.append(state);
+      heading.addEventListener("click", () => { if (!div.open) activateItem(f.field_id); });
+    }
     if (item) {
       div.append(el("p", isReference(f.subject_id) ? "Reference item:" : "Statement under review:"));
       div.append(linkedStatement(item.text, f.subject_id));
@@ -1253,32 +1513,52 @@ function renderForms() {
       const summary = el("p"); summary.dataset.quantitySubject = f.subject_id;
       div.append(summary);
     }
-    fieldControl(f, div);
+    if (grouped) {
+      const atoms = el("div"); atoms.className = "item-atoms";
+      div.append(atoms);
+    }
+    related.forEach((q) => {
+      const control = el("div"); control.className = "item-judgment";
+      fieldControl(q, control);
+      if (grouped && !q.required && !answers.judgments[q.field_id]?.value) {
+        const optional = el("details"); optional.append(el("summary", q.label), control); div.append(optional);
+      } else div.append(control);
+    });
     const nav = el("div");
     nav.className = "item-nav";
+    nav.hidden = !isCurrent;
     const prev = el("button", "Previous item");
     prev.disabled = i === 0;
-    prev.onclick = () => goTo(items[i - 1].field_id);
+    prev.onclick = () => goTo(displayed[i - 1].field_id);
     const next = el("button", "Next unanswered item");
-    next.id = "next-item";
+    next.dataset.nextItem = "true";
+    if (isCurrent) next.id = "next-item";
     next.onclick = () => {
       const target = nextUnanswered();
       if (target) goTo(target.field_id);
-      else $("field-" + (bundle.form.find((x) => !x.subject_id) || {}).field_id)?.focus();
+      else {
+        const control = $("field-" + (bundle.form.find((x) => !x.subject_id) || {}).field_id);
+        revealControl(control); control?.focus();
+      }
     };
     nav.append(prev, next, el("small", " Keys: n next unanswered, p previous."));
     div.append(nav);
     $("items").append(div);
   });
   $("forms").replaceChildren();
+  $("intro-forms").replaceChildren();
+  const firstSubject = bundle.form.findIndex((f) => f.subject_id);
   presentationFields()
     .filter((f) => !f.subject_id && !f.numeric_span_id && !f.atom)
     .forEach((f) => {
-      const div = el("div");
-      div.className = "field";
+      const div = reviewStep("field:" + f.field_id, f.label);
+      div.classList.add("field");
       fieldControl(f, div);
-      $("forms").append(div);
+      const introductory = firstSubject >= 0 && bundle.form.indexOf(f) < firstSubject && !f.require_true;
+      $(introductory ? "intro-forms" : "forms").append(div);
     });
+  $("intro").hidden = !$("intro-forms").childElementCount;
+  if (atomicMode()) renderAtomRows();
   progress();
 }
 function renderDefects() {
@@ -1399,9 +1679,15 @@ function newWorksheetOperand(name, from = {}) {
     entity: from.entity || "", metric: from.metric || "", availability: "selected",
     unavailable_reason: "", selections: [] };
 }
+function worksheetDraftFormula(from) {
+  const constants = new Map((from?.operands || []).filter((o) => o.kind === "constant" &&
+    /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(o.value)).map((o) => [o.name, o.value]));
+  return (from?.formula || "").replace(/[A-Za-z_][A-Za-z_0-9]*/g,
+    (name) => constants.has(name) ? "(" + constants.get(name) + ")" : name);
+}
 function newWorksheet(subjectRef, from = null) {
   return { worksheet_id: "W" + crypto.randomUUID(), contract: "reviewer-calculation-worksheet/v1",
-    authorship: "reviewer", subject: subjectRef, formula: from?.formula || "",
+    authorship: "reviewer", subject: subjectRef, formula: worksheetDraftFormula(from),
     operands: (from?.operands || []).filter((o) => o.kind !== "constant").map((o) => newWorksheetOperand(o.name, o)),
     reported_value: from?.result || "", unit: from?.unit || "", tolerance: from?.tolerance || "0",
     rationale: "", reviewer_support: "unknown" };
@@ -1496,6 +1782,14 @@ function renderWorksheets() {
       if (o.availability === "unavailable") {
         worksheetText(o, "Why unavailable", "unavailable_reason", row, `Worksheet ${n} operand ${j + 1} unavailable reason`);
       } else {
+        // Candidate evidence is a proposal. A receipt is added only after the reviewer confirms it.
+        const originalOperand = supplied?.operands?.find((candidate) => candidate.name === o.name);
+        const proposals = originalOperand ? [originalOperand.citation,
+          ...calculationCitations(originalOperand.calculation)].filter(Boolean) : [];
+        renderCandidatePassages(row, proposals, w.subject?.id || null, o.selections, (receipt) => {
+          o.selections.push(receipt);
+          renderWorksheets(); save();
+        });
         const attach = el("button", "Attach selected passage");
         attach.type = "button";
         attach.setAttribute("aria-label", `Attach selected passage to worksheet ${n} operand ${j + 1}`);
@@ -2153,7 +2447,13 @@ const BINDING = {
   declared_atom_citation: "declared for this fact by the caller's atomization",
 };
 function focusAtomRow(row) {
+  if (bundle.task_kind !== "reference") {
+    const f = itemFields().find((f) => row.claim_ids.includes(f.subject_id));
+    if (f && f.subject_id !== bundle.form.find((q) => q.field_id === current)?.subject_id) goTo(f.field_id, false);
+  }
   const target = document.querySelector(`[data-atom-row="${CSS.escape(row.atom_id)}"]`);
+  const details = target?.closest("details");
+  if (details) details.open = true;
   target?.scrollIntoView({ block: "nearest" });
   target?.querySelector(".atom-focus")?.focus({ preventScroll: true });
 }
@@ -2269,6 +2569,20 @@ function renderAtomRows() {
   const box = $("atoms");
   box.hidden = false;
   const rows = evidence.atoms.rows;
+  document.querySelectorAll(".item-atoms").forEach((node) => node.remove());
+  const hosts = new Map();
+  if (bundle.task_kind !== "reference") {
+    document.querySelectorAll("[data-item-subject]").forEach((host) => {
+      const inline = host.tagName === "DETAILS" || host.classList.contains("current");
+      const group = el(inline ? "div" : "details");
+      group.className = "item-atoms";
+      group.setAttribute("aria-label", "Source checks for " + host.dataset.itemSubject);
+      group.append(el(inline ? "h4" : "summary", "Source checks for this item"));
+      const controls = host.querySelector(".item-judgment");
+      if (controls) controls.before(group); else host.append(group);
+      hosts.set(host.dataset.itemSubject, group);
+    });
+  }
   const guidance = [evidence.atoms.verification_note];
   if (rows.some((r) => atomField(r)))
     guidance.push("Tick a box only after checking that item against its source.");
@@ -2278,6 +2592,7 @@ function renderAtomRows() {
     guidance.push("Prepared sources are independently supplied review aids, not a support judgment; they do not change the original source status.");
   const note = el("p", guidance.join(" ")); note.className = "atom-guidance";
   box.replaceChildren(el("h3", "Atomic source checks"), note);
+  hosts.forEach((host) => host.append(note.cloneNode(true)));
   evidence.atoms.rows.forEach((r, i) => {
     const row = el("div"); row.className = "atom-row " + r.evidence_state; row.dataset.atomRow = r.atom_id;
     row.setAttribute("role", "group"); row.setAttribute("aria-label", `Atom ${i + 1}: ${r.text}`);
@@ -2368,8 +2683,17 @@ function renderAtomRows() {
     if (r.claim_ids.length) more.append(el("small", "Statement ids: " + r.claim_ids.join(", ")));
     more.append(el("small", `Atom ${r.atom_id} · offsets ${r.start}–${r.end} in ${r.field_path}`));
     row.append(more);
-    box.append(row);
+    const owner = r.claim_ids.find((id) => hosts.has(id));
+    (hosts.get(owner) || box).append(row);
   });
+  box.hidden = !box.querySelector("[data-atom-row]");
+  if (hosts.size && !box.hidden) {
+    const extra = el("details");
+    extra.append(el("summary", "Source checks for other answer passages"));
+    while (box.firstChild) extra.append(box.firstChild);
+    box.append(extra);
+    $("item-navigation").after(box);
+  }
 }
 function renderedSource(sourceId) {
   let entry = renderCache.get(sourceId);

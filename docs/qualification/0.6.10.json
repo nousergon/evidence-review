@@ -1,10 +1,10 @@
 {
   "schema_version": "evidence-review-qualification/v1",
   "package_version": "0.6.10",
-  "source_tree_sha1": "ec314618b475d0fa6d8d921409496a54247d92ea",
-  "verified_source_commit": "54aa52106ddd7a088c41d672e5131062de03681c",
+  "source_tree_sha1": "35af02bf6a8276633807d24792570b74576ef2fd",
+  "verified_source_commit": "1841a78e4130e7e62139063d37c19ab70bfdfb6a",
   "wheel": "evidence_review-0.6.10-py3-none-any.whl",
-  "wheel_sha256": "dc669250832c13a4f8c189c53f125e5fc306c66f77d1db20079837f6609a0ed4",
+  "wheel_sha256": "dead70f2736e2b23ad6eada948d44265baccc123fefb119c6982e1496373b678",
   "reproducible_wheel": true,
   "clean_noneditable_install": true,
   "installed_files": {
@@ -24,11 +24,11 @@
     "evidence_review/source_rendering.py": "2d2cb3594548b2c617039160b4b8d6ac64020e42b26231c34109ce78000b16fe",
     "evidence_review/store.py": "01bfd80c25865233020208cde1efef24b8794365beba0cf4d09f3ac616edc8eb",
     "evidence_review/table_context.py": "f2953f2a869bf16da716badac5cb24a01d0e606ba30670fa334916cfe365cb2c",
-    "evidence_review/ui/app.js": "328018f12235e82d01aecaad1944de04da36822c94905009c9ff2d28357137ca",
+    "evidence_review/ui/app.js": "2ffad183dca3167a275727dfe2d31771ff24d6fea2c5875602eb123e2f55f58b",
     "evidence_review/ui/index.html": "d3ed795adba5f92c73bae08dbd4f2f7cd74b76475b954933c382014627dc23f1",
     "evidence_review/ui/styles.css": "6b9dc6a6b3510123872edeac79eefa23a7728d3fc79e8b9a053b835fb8a502d2"
   },
-  "installed_content_sha256": "43b30003c816484605c2fca1cde04f182238f300d71d803c90c06ffaafaece30",
+  "installed_content_sha256": "8b91daed33e3872ada14de7e73ac830718b17feba8de07eacee340f605a659d1",
   "schemas": {
     "answer-annotation-v1.json": "c02bae70e37ee5a59e6fd8a6fb3efb0c3c5470b4f31503ff87550d92b0fc9db9",
     "atom-evidence-v1.json": "bbcf85df5dead2da504667f72904cd858325fad4d22cda0b4d66b532f07a383d",
@@ -36,8 +36,8 @@
     "review-submission-v1.json": "923dd4d944a8362399f291053a59c983d105901a1e397fe8dd15d92e5612bd7c",
     "source-render-manifest-v1.json": "1dac8199de75b5a3afa5306f66fba8dba2ac669a901ca591907b25b75571d52c"
   },
-  "tests_passed": 652,
-  "coverage_percent": 94.11,
+  "tests_passed": 653,
+  "coverage_percent": 94.27,
   "verified_by_automation": [
     "native recomputation selection records one linked worksheet with exact proposed operand passages; saved verdicts without worksheets stay pending; existing reviewer methods are never overwritten and missing source inputs never receive invented receipts (synthetic, Chromium)",
     "contracts, atom/render sidecars and capability negotiation",

@@ -38,7 +38,7 @@ def test_supported_confirms_all_statement_passages_in_one_saved_action(tmp_path)
         passage = item.get_by_role("group", name="Proposed source passages")
         expect(passage.get_by_role("button", name="Confirm checked passage", exact=True)).to_have_count(0)
         assert not store.load_task(b.bundle_id)["answers"]["judgments"]["support:fees"]["selections"]
-        expect(item.get_by_label("Support: fees", exact=True)).to_have_value("supported")
+        expect(item.get_by_label("Support: fees", exact=True).locator("option:checked")).to_have_text("Supported saved — confirm evidence")
         page.get_by_role("button", name="Submit review", exact=True).click()
         expect(page.locator("#status")).to_contain_text("confirm the proposed evidence")
         assert store.load_task(b.bundle_id)["last_submission"] is None
@@ -164,4 +164,28 @@ def test_missing_proposals_name_actual_blocker_instead_of_reselection_loop(tmp_p
         page.get_by_role("button", name="Submit review", exact=True).click()
         expect(page.locator("#status")).to_contain_text("Support: fees")
         expect(page.locator("#status")).to_contain_text("no exact passage is proposed")
+        browser.close()
+
+def test_pending_supported_confirmation_works_with_native_keyboard(tmp_path):
+    b = passage_bundle()
+    store = FileStore(tmp_path)
+    store.register(b)
+    store.save_snapshot(b, 0, "legacy", {"judgments": {"support:fees": {"value": "supported"}}}, "Synthetic reviewer", 0)
+    with open_review(b, store, launch=False, presentation_mode="atomic-source-check/v1") as h, sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.goto(h.url)
+        control = page.get_by_label("Support: fees", exact=True)
+        expect(control.locator("option:checked")).to_have_text("Supported saved — confirm evidence")
+        assert store.load_task(b.bundle_id)["answers"]["judgments"]["support:fees"]["value"] == "supported"
+        group = page.locator('details.item[data-item-subject="fees"]')
+        if group.get_attribute("open") is None:
+            group.locator(":scope > summary").click()
+        expect(control).to_be_visible()
+        control.focus()
+        page.keyboard.press("s")
+        page.keyboard.press("Tab")
+        expect(page.locator("#status")).to_contain_text("revision 2")
+        saved = store.load_task(b.bundle_id)["answers"]["judgments"]["support:fees"]
+        assert saved["value"] == "supported" and len(saved["selections"]) == 1
         browser.close()

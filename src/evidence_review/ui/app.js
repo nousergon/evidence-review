@@ -1260,7 +1260,15 @@ function fieldControl(f, div) {
     control.append(new Option("Choose…", ""));
     f.options.forEach((v) => control.append(new Option(v, v)));
     control.value = answers.judgments[f.field_id]?.value || "";
-
+    if (needsStatementConfirmation(f) &&
+        judgmentCitations(f).some((c) => proposedReceipt(c, f.subject_id))) {
+      // A native select emits no change when its already-selected value is picked.
+      // Keep the saved judgment, but give its pending evidence confirmation a distinct
+      // display state so one genuine selection of supported records the receipts.
+      control.options[0].textContent = "Supported saved — confirm evidence";
+      control.options[0].disabled = true;
+      control.value = "";
+    }
   } else {
     control = el("input");
     control.type = f.kind === "boolean" ? "checkbox" : "text";

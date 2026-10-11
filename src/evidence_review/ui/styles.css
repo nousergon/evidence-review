@@ -346,3 +346,9 @@ mark.cited-words { background: #fff0bc; text-decoration: underline; text-decorat
 .choice-group { display: flex; flex-direction: column; gap: .15rem; margin: .3rem 0; }
 .choice-group > label { display: block; }
 .choice-group[hidden] { display: none; }
+
+.candidate-passages { margin: 1rem 0; }
+.candidate-passages h4, .candidate-passage h5 { margin: .5rem 0; }
+.candidate-passage { margin: .5rem 0; padding: .75rem; border: 1px solid #ccd7e0; border-radius: 4px; background: #f5f7fa; }
+.candidate-passage blockquote { margin: .5rem 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.candidate-passage small { display: block; overflow-wrap: anywhere; }

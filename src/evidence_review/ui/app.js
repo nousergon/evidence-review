@@ -138,7 +138,7 @@ function presentationFields() {
 }
 function status() {
   const fields = requiredFieldsOnly() ? bundle.form.filter((f) => f.required) : bundle.form;
-  const completed = fields.filter((f) => Object.hasOwn(answers.judgments, f.field_id)).length;
+  const completed = fields.filter((f) => answers.judgments[f.field_id] && answers.judgments[f.field_id].value !== "").length;
   const hook = state.hook;
   $("status").className = "";
   $("status").textContent =
@@ -1037,6 +1037,121 @@ function claimLinks(f) {
     }
   });
 }
+function samePassage(a, b) {
+  return a.source_id === b.source_id && a.source_hash === b.source_hash &&
+    a.start_line === b.start_line && a.end_line === b.end_line && a.subject_id === b.subject_id;
+}
+function calculationCitations(calculation) {
+  return (calculation?.operands || []).flatMap((o) =>
+    [...(o.citation ? [o.citation] : []), ...calculationCitations(o.calculation)]);
+}
+function judgmentCitations(f) {
+  const item = subjectOf(f);
+  const citations = [...(item?.citations || []), ...calculationCitations(item?.calculation)];
+  for (const span of bundle.spans.filter((s) => s.claim_ids.includes(f.subject_id))) {
+    if (span.state === "ambiguous") {
+      citations.push({status: "ambiguous", reason: span.reason || "Several source candidates; none chosen"});
+      continue;
+    }
+    citations.push(...span.citations, ...calculationCitations(span.calculation));
+  }
+  return citations;
+}
+function proposedReceipt(c, subjectId) {
+  const source = bundle.sources.find((s) => s.source_id === c.source_id);
+  if (!source || c.status !== "located" || !Number.isInteger(c.start_line) ||
+      !Number.isInteger(c.end_line) || c.start_line < 1 || c.end_line < c.start_line) return null;
+  const view = evidence.views[c.source_id + ":" + c.start_line + ":" + c.end_line];
+  if (!view || typeof view.text !== "string") return null;
+  return {source_id: source.source_id, source_hash: source.sha256,
+    start_line: c.start_line, end_line: c.end_line, excerpt: view.text, subject_id: subjectId};
+}
+async function viewProposedPassage(c, receipt, origin) {
+  subject = receipt.subject_id;
+  selection = null;
+  $("evidence-panel").open = true;
+  if (!evidence.rendered_sources?.[receipt.source_id]) {
+    invalidateNavigation();
+    $("evidence").replaceChildren();
+    showSource(bundle.sources.find((s) => s.source_id === receipt.source_id), receipt.start_line, receipt.end_line);
+    return;
+  }
+  const generation = ++navigation, epoch = taskEpoch, bundleId = bundle.bundle_id, bundleHash = state.bundle_hash;
+  const viewer = $("viewer");
+  viewer.hidden = false;
+  viewerOrigin = origin;
+  viewer.replaceChildren(el("p", "Opening source…"));
+  try {
+    const data = await renderedSource(receipt.source_id).promise;
+    if (generation !== navigation || epoch !== taskEpoch || bundleId !== bundle.bundle_id || bundleHash !== state.bundle_hash) return;
+    const target = data.manifest.targets.find((t) => t.source_id === c.source_id &&
+      t.start_line === c.start_line && t.end_line === c.end_line && t.excerpt === c.excerpt);
+    if (target) await openTarget({...target, rendered: true}, origin, null);
+    else {
+      viewer.replaceChildren(el("p", "No rendered location for this passage; inspect the exact frozen lines below."));
+      $("evidence").replaceChildren();
+      showSource(bundle.sources.find((s) => s.source_id === receipt.source_id), receipt.start_line, receipt.end_line);
+    }
+  } catch (error) {
+    if (generation !== navigation || epoch !== taskEpoch || bundleHash !== state.bundle_hash) return;
+    viewer.replaceChildren(el("p", "Rendered source unavailable: " + error.message + ". Inspect the frozen lines below."));
+    $("evidence").replaceChildren();
+    showSource(bundle.sources.find((s) => s.source_id === receipt.source_id), receipt.start_line, receipt.end_line);
+  }
+}
+function renderCandidatePassages(box, citations, subjectId, selections, onConfirm) {
+  const group = el("div");
+  group.className = "candidate-passages";
+  group.setAttribute("role", "group");
+  group.setAttribute("aria-label", "Proposed source passages");
+  group.append(el("h4", "Proposed source passages"),
+    el("p", "Inspect each passage against this item, then confirm the passages you checked. Confirmation attaches evidence; choose your judgment separately."));
+  const seen = new Set(), unresolved = new Set();
+  for (const c of citations) {
+    const receipt = proposedReceipt(c, subjectId);
+    if (!receipt) {
+      unresolved.add(c.reason || (c.status || "unresolved") + ": no exact frozen passage available");
+      continue;
+    }
+    const key = JSON.stringify([receipt.source_id, receipt.source_hash, receipt.start_line, receipt.end_line]);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const source = bundle.sources.find((s) => s.source_id === receipt.source_id);
+    const card = el("div"); card.className = "candidate-passage";
+    card.append(el("h5", source.title + " · L" + receipt.start_line + "–L" + receipt.end_line),
+      el("blockquote", receipt.excerpt), el("small", "Frozen SHA-256: " + receipt.source_hash));
+    const view = el("button", "View source passage"); view.type = "button";
+    view.onclick = () => viewProposedPassage(c, receipt, view);
+    const confirmed = selections.some((s) => samePassage(s, receipt));
+    const confirm = el("button", confirmed ? "Passage confirmed" : "Confirm checked passage");
+    confirm.type = "button"; confirm.disabled = confirmed;
+    confirm.onclick = () => {
+      if (selections.some((s) => samePassage(s, receipt))) return;
+      onConfirm(structuredClone(receipt));
+    };
+    const controls = el("div");
+    controls.append(view, confirm);
+    card.append(controls);
+    group.append(card);
+  }
+  if (!seen.size) group.append(el("p", "No exact passage is proposed. Search or select frozen source lines manually; missing or ambiguous evidence remains unresolved."));
+  unresolved.forEach((reason) => group.append(el("p", "Unresolved source: " + reason)));
+  box.append(group);
+  return group;
+}
+function fieldCalculation(f) {
+  if (f.field_id.startsWith("calc:")) {
+    const id = f.field_id.slice(5);
+    const span = bundle.spans.find((s) => s.span_id === id);
+    if (span?.calculation) return {subject: {kind: "span", id}, calculation: span.calculation};
+    const claim = bundle.claims.find((c) => c.claim_id === id);
+    if (claim?.calculation) return {subject: {kind: "claim", id}, calculation: claim.calculation};
+  }
+  const item = subjectOf(f);
+  if (!item?.calculation) return null;
+  return {subject: {kind: isReference(f.subject_id) ? "reference" : "claim", id: f.subject_id},
+    calculation: item.calculation};
+}
 function fieldControl(f, div) {
   let control;
   if (f.kind === "boolean" && !f.require_true) {
@@ -1100,13 +1215,38 @@ function fieldControl(f, div) {
     div.append(el("p", "Select the claims that address this issue in the report pane."));
   if (bundle.task_kind === "reference")
     div.append(el("p", "Source context is attached automatically for an explained correction or uncertainty. This does not verify it or check quantities. A verified verdict still requires every quantity checked. Additional passage attachments are optional."));
+  if (f.subject_id && !f.numeric_span_id && !f.atom) {
+    renderCandidatePassages(div, judgmentCitations(f), f.subject_id,
+      answers.judgments[f.field_id]?.selections || [], (receipt) => {
+        const j = judgment(f.field_id);
+        if (!j.selections.some((s) => samePassage(s, receipt))) j.selections.push(receipt);
+        renderForms(); save();
+      });
+  }
+  const supplied = fieldCalculation(f);
+  if (supplied) {
+    div.append(el("p", "A worksheet starts from the supplied formula and inputs. Check its passages and edit the draft before choosing a recomputation judgment."));
+    const prepare = el("button", "Use supplied calculation as draft worksheet");
+    prepare.type = "button";
+    prepare.onclick = () => {
+      const existing = (answers.worksheets || []).find((w) =>
+        w.subject?.kind === supplied.subject.kind && w.subject?.id === supplied.subject.id);
+      if (existing) {
+        renderWorksheets();
+        document.querySelector('[data-worksheet="' + CSS.escape(existing.worksheet_id) + '"] input')?.focus();
+      } else addWorksheet(supplied.subject, supplied.calculation);
+    };
+    div.append(prepare);
+  }
   const attach = el("button", "Attach selected source passage");
   attach.onclick = () => {
     if (!selection) {
       $("status").textContent = "Select a passage first: open a source and click its first and last line.";
       return;
     }
-    judgment(f.field_id).selections.push(structuredClone(selection));
+    const receipt = {...structuredClone(selection), subject_id: f.subject_id || selection.subject_id};
+    const j = judgment(f.field_id);
+    if (!j.selections.some((s) => samePassage(s, receipt))) j.selections.push(receipt);
     renderForms();
     save();
   };
@@ -1399,9 +1539,15 @@ function newWorksheetOperand(name, from = {}) {
     entity: from.entity || "", metric: from.metric || "", availability: "selected",
     unavailable_reason: "", selections: [] };
 }
+function worksheetDraftFormula(from) {
+  const constants = new Map((from?.operands || []).filter((o) => o.kind === "constant" &&
+    /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(o.value)).map((o) => [o.name, o.value]));
+  return (from?.formula || "").replace(/[A-Za-z_][A-Za-z_0-9]*/g,
+    (name) => constants.has(name) ? "(" + constants.get(name) + ")" : name);
+}
 function newWorksheet(subjectRef, from = null) {
   return { worksheet_id: "W" + crypto.randomUUID(), contract: "reviewer-calculation-worksheet/v1",
-    authorship: "reviewer", subject: subjectRef, formula: from?.formula || "",
+    authorship: "reviewer", subject: subjectRef, formula: worksheetDraftFormula(from),
     operands: (from?.operands || []).filter((o) => o.kind !== "constant").map((o) => newWorksheetOperand(o.name, o)),
     reported_value: from?.result || "", unit: from?.unit || "", tolerance: from?.tolerance || "0",
     rationale: "", reviewer_support: "unknown" };
@@ -1496,6 +1642,14 @@ function renderWorksheets() {
       if (o.availability === "unavailable") {
         worksheetText(o, "Why unavailable", "unavailable_reason", row, `Worksheet ${n} operand ${j + 1} unavailable reason`);
       } else {
+        // Candidate evidence is a proposal. A receipt is added only after the reviewer confirms it.
+        const originalOperand = supplied?.operands?.find((candidate) => candidate.name === o.name);
+        const proposals = originalOperand ? [originalOperand.citation,
+          ...calculationCitations(originalOperand.calculation)].filter(Boolean) : [];
+        renderCandidatePassages(row, proposals, w.subject?.id || null, o.selections, (receipt) => {
+          o.selections.push(receipt);
+          renderWorksheets(); save();
+        });
         const attach = el("button", "Attach selected passage");
         attach.type = "button";
         attach.setAttribute("aria-label", `Attach selected passage to worksheet ${n} operand ${j + 1}`);

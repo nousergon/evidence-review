@@ -1160,7 +1160,9 @@ function directJudgmentCitations(subjectId) {
 }
 function judgmentCitations(f) {
   return [...directJudgmentCitations(f.subject_id),
-    ...mentionedPremises(subjectOf(f)).flatMap((c) => directJudgmentCitations(c.claim_id)),
+    ...mentionedPremises(subjectOf(f)).flatMap((premise) => directJudgmentCitations(premise.claim_id).map((c) =>
+      ({...c, reviewOrigin: "related_author_evidence", reviewReason:
+        "Source cited for premise " + premise.claim_id + " in the author’s inference; not an original citation for this passage."}))),
     ...(subjectOf(f)?.review_context || []).flatMap((p) => p.citations.map((c) =>
       ({...c, reviewOrigin: p.origin, reviewReason: p.reason})))];
 }

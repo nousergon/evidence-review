@@ -123,13 +123,18 @@ def test_current_calculation_prepares_one_linked_draft_with_named_constants(tmp_
         assert span.calculation.formula == "(current - prior) * scale"
         browser.close()
 
-def test_inference_proposes_named_premise_passages_without_changing_originals(tmp_path):
+@pytest.mark.parametrize("review_context", [False, True])
+def test_inference_proposes_named_premise_passages_without_changing_originals(tmp_path, review_context):
     b = passage_bundle()
     b.claims = [
         Claim(claim_id="C1", text="First premise", citations=[located(2, "exclude service fees")]),
         Claim(claim_id="C2", text="Second premise", citations=[located(3, "review rule")]),
         Claim(claim_id="C3", text="Inference", support_declaration="inference: Weighting C1-C2."),
     ]
+    if review_context:
+        from evidence_review.contracts import ReviewContext
+        b.claims[-1].review_context = [ReviewContext(origin="source_search", reason="Related search result",
+            citations=[located(2, "exclude service fees")])]
     b.fields[0].claim_ids = ["C1", "C2", "C3"]
     b.form = [FormField(field_id="support:C3", label="Support inference", subject_id="C3",
                         options=["supported", "cannot determine"], evidence_required=True)]
@@ -141,6 +146,9 @@ def test_inference_proposes_named_premise_passages_without_changing_originals(tm
         page.goto(h.url)
         proposals = page.get_by_role("group", name="Proposed source passages")
         expect(proposals).to_contain_text("C1, C2")
+        if review_context:
+            expect(proposals.get_by_text("Original model citation", exact=True)).to_have_count(0)
+            expect(proposals).to_contain_text("Review assistance — related author evidence")
         expect(proposals.get_by_role("button", name="View source passage")).to_have_count(2)
         assert not store.load_task(b.bundle_id)["answers"]["judgments"]
         page.get_by_label("Assessor", exact=True).fill("Synthetic reviewer")

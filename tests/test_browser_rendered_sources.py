@@ -178,7 +178,7 @@ def test_calculation_operand_opens_panel_even_with_external_source_link(tmp_path
         page.locator('.input-derivation').filter(has_text='current:').first.get_by_role('button', name='24.6', exact=True).click()
         expect(page.locator('#viewer .target-hit').first).to_contain_text('24.6')
         assert len(ctx.pages) == 1
-        assert not [url for url in log['requests'] if 'github.com' in url]
+        assert_offline(h, page, log)
         original = page.locator('#viewer').get_by_role('link', name='Open original externally', exact=False)
         expect(original).to_be_visible()
         expect(original).to_have_attribute('href', links[sid]['url'] + '#L6-L6')

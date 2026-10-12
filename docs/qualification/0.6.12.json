@@ -2,9 +2,9 @@
   "schema_version": "evidence-review-qualification/v1",
   "package_version": "0.6.12",
   "source_tree_sha1": "9c17869d401ee81d2316559c8788839ace4458fe",
-  "verified_source_commit": "529b23d57b1997a8fb236510f0351e6d6053c62e",
+  "verified_source_commit": "df326c393a2a0114c8581de510d155aa7a7b0cf6",
   "wheel": "evidence_review-0.6.12-py3-none-any.whl",
-  "wheel_sha256": "833c90739664b81826362df24f234507d9d8c57db1a2609ded65ebe01fcb1167",
+  "wheel_sha256": "dca26d08b74622479e7ee241fddead665072a03d784aa9a9d93746d13f95d1b8",
   "reproducible_wheel": true,
   "clean_noneditable_install": true,
   "installed_files": {
@@ -24,11 +24,11 @@
     "evidence_review/source_rendering.py": "2d2cb3594548b2c617039160b4b8d6ac64020e42b26231c34109ce78000b16fe",
     "evidence_review/store.py": "b4e9d5e5b036a1613021f828b37bb67ed2dfe2e7d71ab670205c500efcb904d2",
     "evidence_review/table_context.py": "f2953f2a869bf16da716badac5cb24a01d0e606ba30670fa334916cfe365cb2c",
-    "evidence_review/ui/app.js": "c4b543b591f91b0d76b02c71675dfaa823517a76b01ce9bf784db9956e771732",
+    "evidence_review/ui/app.js": "179f1a37ca8c9336a36efdcfcd9cd8b6238e587689e42bb87a54f90fa61d8340",
     "evidence_review/ui/index.html": "2c5b6845171391a67dcc7fada3a5b9ffae2e99eb6b1276b0a72550fb6dd76f8e",
     "evidence_review/ui/styles.css": "af050d96e764612fd7623838612328b757336e0bc3f1b8ed57d03329f438848a"
   },
-  "installed_content_sha256": "921bd5adced001bfbdc4f2a9657c661767458d83f29ee4b69e87304051e8d5d3",
+  "installed_content_sha256": "1c35f5de0a1d681d1f1d822856788f211899a39cbac671a1819b322d593e9b30",
   "schemas": {
     "answer-annotation-v1.json": "c02bae70e37ee5a59e6fd8a6fb3efb0c3c5470b4f31503ff87550d92b0fc9db9",
     "atom-evidence-v1.json": "bbcf85df5dead2da504667f72904cd858325fad4d22cda0b4d66b532f07a383d",

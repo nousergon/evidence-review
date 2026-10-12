@@ -1649,8 +1649,14 @@ function renderForms() {
     }
     related.forEach((q) => {
       const control = el("div"); control.className = "item-judgment";
-      fieldControl(q, control, evidenceHost || control);
-      if (grouped && !q.required && !answers.judgments[q.field_id]?.value) {
+      const optionalUnanswered = grouped && !q.required && !answers.judgments[q.field_id]?.value;
+      const fieldEvidence = optionalUnanswered ? el("details") : evidenceHost;
+      if (optionalUnanswered) {
+        fieldEvidence.append(el("summary", "Optional evidence: " + q.label));
+        evidenceHost.append(fieldEvidence);
+      }
+      fieldControl(q, control, fieldEvidence || control);
+      if (optionalUnanswered) {
         const optional = el("details"); optional.append(el("summary", q.label), control); decisions.append(optional);
       } else decisions.append(control);
     });

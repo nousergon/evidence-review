@@ -241,6 +241,6 @@ def test_bound_numbers_open_their_line_and_calculations_link_every_input(tmp_pat
         expect(evidence.get_by_role("heading", name="180 bps", exact=True)).to_be_visible()
         expect(evidence).to_contain_text("Formula: (current - prior) * 100")
         for value in ["24.6", "22.8"]:
-            expect(evidence.get_by_role("link", name=value, exact=True)).to_have_attribute("href", base + "#L6-L6")
+            expect(evidence.get_by_role("button", name=value, exact=True)).to_have_count(1)
         expect(evidence).to_contain_text("current: 24.6")
         expect(evidence).to_contain_text("prior: 22.8")

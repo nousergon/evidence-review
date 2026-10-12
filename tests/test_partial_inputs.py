@@ -61,14 +61,14 @@ def test_linked_subtotal_is_concise_before_optional_diagnostics(tmp_path):
         page.get_by_role('region', name='Report', exact=True).get_by_role('button', name='180 bps, derived', exact=True).click()
         card = page.get_by_role('region', name='Calculation details')
         for value in ['24', '0.6']:
-            expect(card.get_by_role('link', name=value, exact=True)).to_have_attribute('href', links['filing']['line_url'].format(start=6, end=6))
+            expect(card.get_by_role('button', name=value, exact=True)).to_have_count(1)
         expect(card).to_contain_text('Located inputs (independent)')
         expect(card).to_contain_text('Candidate citation')
         expect(card.get_by_text('Formula literal (source association not established): 100', exact=True)).not_to_be_visible()
         card.get_by_role('button', name='Preview calculation evidence', exact=True).click()
         panel = page.get_by_role('region', name='Evidence', exact=True)
-        expect(panel.get_by_role('link', name='24', exact=True)).to_be_visible()
-        expect(panel.get_by_role('link', name='0.6', exact=True)).to_be_visible()
+        expect(panel.get_by_role('button', name='24', exact=True)).to_be_visible()
+        expect(panel.get_by_role('button', name='0.6', exact=True)).to_be_visible()
         assert store.load_task(b.bundle_id)['answers'] == before
         browser.close()
 

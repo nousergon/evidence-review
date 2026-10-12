@@ -378,3 +378,31 @@ def test_flattened_citation_shows_unique_matching_frozen_table(tmp_path, plain_l
             expect(table).to_have_count(0)
             expect(page.locator("#viewer .target-hit")).to_contain_text("Class_A")
         browser.close()
+
+
+def test_grouped_item_lists_all_evidence_before_final_decisions(tmp_path):
+    from test_browser_review import margin_bundle
+    b = margin_bundle()
+    b.form.append(FormField(field_id='materiality:margin', label='Materiality if defective', required=False,
+        options=['material', 'not_material'], subject_id='margin'))
+    span = next(s for s in b.spans if s.calculation)
+    b.form.insert(0, FormField(field_id='calc:' + span.span_id, label='Recomputed margin',
+        options=['recomputed_matches', 'cannot_verify'], subject_id='margin'))
+    with open_review(b, FileStore(tmp_path), launch=False, presentation_mode='atomic-source-check/v1') as h, sync_playwright() as pw:
+        browser = pw.chromium.launch(); page = browser.new_page(); page.goto(h.url)
+        expect(page.locator('#status')).to_contain_text('Saved locally')
+        item = page.locator('[data-item-subject="margin"]')
+        expect(item.locator('.item-decisions')).to_be_visible()
+        optional = item.get_by_text('Optional evidence: Materiality if defective', exact=True)
+        expect(optional).to_be_visible()
+        expect(item.locator('.item-evidence > details .candidate-passages')).not_to_be_visible()
+        optional.click()
+        expect(item.locator('.item-evidence > details .candidate-passages')).to_be_visible()
+        assert item.evaluate('''node => {
+            const decisions = node.querySelector('.item-decisions');
+            const evidence = [...node.querySelectorAll('.item-atoms, .candidate-passages, [aria-label="Proposed calculation worksheet"]')];
+            return evidence.length >= 3 && evidence.every(e => Boolean(e.compareDocumentPosition(decisions) & Node.DOCUMENT_POSITION_FOLLOWING));
+        }''')
+        expect(item.locator('.item-decisions').get_by_label('Recomputed margin', exact=True)).to_be_visible()
+        expect(item.locator('.item-decisions').get_by_label('Does the evidence support the margin claim?', exact=True)).to_be_visible()
+        browser.close()

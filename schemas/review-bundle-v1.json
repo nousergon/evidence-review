@@ -185,6 +185,13 @@
           "default": "",
           "title": "Support Declaration",
           "type": "string"
+        },
+        "review_context": {
+          "items": {
+            "$ref": "#/$defs/ReviewContext"
+          },
+          "title": "Review Context",
+          "type": "array"
         }
       },
       "required": [
@@ -705,6 +712,37 @@
         "text"
       ],
       "title": "ReportField",
+      "type": "object"
+    },
+    "ReviewContext": {
+      "additionalProperties": false,
+      "description": "Navigation assistance, never an author citation or a support verdict.",
+      "properties": {
+        "origin": {
+          "enum": [
+            "source_search",
+            "related_author_evidence"
+          ],
+          "title": "Origin",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "citations": {
+          "items": {
+            "$ref": "#/$defs/Citation"
+          },
+          "title": "Citations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "origin",
+        "reason"
+      ],
+      "title": "ReviewContext",
       "type": "object"
     },
     "ReviewWorkload": {

@@ -227,6 +227,10 @@ def bundle_citations(bundle):
             add(c)
         if item.calculation:
             calc(item.calculation)
+    for claim in bundle.claims:
+        for context in claim.review_context:
+            for citation in context.citations:
+                add(citation)
     for span in bundle.spans:
         for p in span.prepared_evidence:
             for c in p.citations:

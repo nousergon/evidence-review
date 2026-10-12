@@ -1160,7 +1160,9 @@ function directJudgmentCitations(subjectId) {
 }
 function judgmentCitations(f) {
   return [...directJudgmentCitations(f.subject_id),
-    ...mentionedPremises(subjectOf(f)).flatMap((c) => directJudgmentCitations(c.claim_id))];
+    ...mentionedPremises(subjectOf(f)).flatMap((c) => directJudgmentCitations(c.claim_id)),
+    ...(subjectOf(f)?.review_context || []).flatMap((p) => p.citations.map((c) =>
+      ({...c, reviewOrigin: p.origin, reviewReason: p.reason})))];
 }
 function proposedReceipt(c, subjectId) {
   const source = bundle.sources.find((s) => s.source_id === c.source_id);
@@ -1212,6 +1214,12 @@ function renderCandidatePassages(box, citations, subjectId, selections, onConfir
   group.append(el("h4", "Proposed source passages"),
     el("p", statement ? "Choosing supported confirms this statement against all proposed passages below and attaches them in one action. You can inspect the sources before choosing." : "Inspect each passage against this item, then confirm the passages you checked. Confirmation attaches evidence; choose your judgment separately."));
   const premises = statement ? mentionedPremises(bundle.claims.find((c) => c.claim_id === subjectId)) : [];
+  const assistance = statement ? (bundle.claims.find((c) => c.claim_id === subjectId)?.review_context || []) : [];
+  if (assistance.length) {
+    group.append(el("p", "Review assistance is related source context, not an original citation or proof that this passage is supported. Check each assertion and any inference yourself."));
+    if (!directJudgmentCitations(subjectId).some((c) => c.status === "located"))
+      group.append(el("p", "No original citation was located for this passage."));
+  }
   if (premises.length) group.append(el("p", "Additional passage proposals from statements mentioned in the author's inference: " +
     premises.map((c) => c.claim_id).join(", ") +
     ". These are navigation suggestions, not original citations for this statement or proof of the inference. Assess the reasoning and missing qualifications yourself."));
@@ -1227,6 +1235,9 @@ function renderCandidatePassages(box, citations, subjectId, selections, onConfir
     seen.add(key);
     const source = bundle.sources.find((s) => s.source_id === receipt.source_id);
     const card = el("div"); card.className = "candidate-passage";
+    if (c.reviewOrigin) card.append(el("strong", c.reviewOrigin === "source_search"
+      ? "Review assistance — source search" : "Review assistance — related author evidence"), el("p", c.reviewReason));
+    else if (assistance.length) card.append(el("strong", "Original model citation"));
     card.append(el("h5", source.title + " · L" + receipt.start_line + "–L" + receipt.end_line),
       el("blockquote", receipt.excerpt), el("small", "Frozen SHA-256: " + receipt.source_hash));
     const view = el("button", "View source passage"); view.type = "button";
@@ -1655,10 +1666,10 @@ function renderForms() {
         fieldEvidence.append(el("summary", "Optional evidence: " + q.label));
         evidenceHost.append(fieldEvidence);
       }
+      // Optional fields may become required by the consumer after another verdict.
+      // Keep decisions such as materiality visible; ancillary evidence stays collapsed.
       fieldControl(q, control, fieldEvidence || control);
-      if (optionalUnanswered) {
-        const optional = el("details"); optional.append(el("summary", q.label), control); decisions.append(optional);
-      } else decisions.append(control);
+      decisions.append(control);
     });
     const nav = el("div");
     nav.className = "item-nav";

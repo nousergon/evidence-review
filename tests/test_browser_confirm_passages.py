@@ -406,3 +406,44 @@ def test_grouped_item_lists_all_evidence_before_final_decisions(tmp_path):
         expect(item.locator('.item-decisions').get_by_label('Recomputed margin', exact=True)).to_be_visible()
         expect(item.locator('.item-decisions').get_by_label('Does the evidence support the margin claim?', exact=True)).to_be_visible()
         browser.close()
+
+
+def test_review_context_keeps_original_citations_separate_and_confirms_once(tmp_path):
+    b = passage_bundle().model_dump(mode="json")
+    b["claims"][0]["citations"] = []
+    b["claims"][0]["review_context"] = [{
+        "origin": "source_search", "reason": "Related frozen source text; relevance requires human review.",
+        "citations": [located(2, "exclude service fees").model_dump(mode="json")]}]
+    b = type(passage_bundle()).model_validate(b)
+    store = FileStore(tmp_path)
+    with open_review(b, store, launch=False, presentation_mode="atomic-source-check/v1") as h, sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.goto(h.url)
+        item = page.get_by_label("Current item")
+        expect(item).to_contain_text("Review assistance — source search")
+        expect(item).to_contain_text("No original citation")
+        expect(item.get_by_role("button", name="View source passage")).to_have_count(1)
+        assert not store.load_task(b.bundle_id)["answers"]["judgments"]
+        page.get_by_label("Assessor", exact=True).fill("Synthetic reviewer")
+        item.get_by_label("Support: fees", exact=True).select_option("supported")
+        expect(page.locator("#status")).to_contain_text("revision 1")
+        saved = store.load_task(b.bundle_id)["answers"]["judgments"]["support:fees"]
+        assert len(saved["selections"]) == 1
+        assert saved["selections"][0]["start_line"] == 2
+        assert b.claims[0].citations == []
+        page.reload()
+        expect(page.get_by_label("Support: fees", exact=True)).to_have_value("supported")
+        browser.close()
+
+
+def test_optional_materiality_is_visible_with_item_decisions(tmp_path):
+    b = passage_bundle()
+    b.form.insert(1, FormField(field_id="material:fees", label="Materiality if defective", required=False,
+                              subject_id="fees", options=["material", "not_material"]))
+    with open_review(b, FileStore(tmp_path), launch=False, presentation_mode="atomic-source-check/v1") as h, sync_playwright() as pw:
+        browser = pw.chromium.launch()
+        page = browser.new_page()
+        page.goto(h.url)
+        expect(page.get_by_label("Materiality if defective", exact=True)).to_be_visible()
+        browser.close()

@@ -90,3 +90,5 @@ and saves one linked reviewer worksheet. A saved verdict without a worksheet is
 shown as pending confirmation. Existing reviewer worksheets are retained; edit them
 to change the method. Nested or unsourced inputs still require an explicit reviewer
 worksheet. Arithmetic agreement does not decide source support.
+
+Claim-level `review_context` carries separately attributed source-search or related-author-evidence passages. These are navigation assistance, never candidate citations or a support verdict. Sources remain hash-bound; choosing supported records the reviewer’s confirmation once. Optional item decisions remain visible beside the main verdict.

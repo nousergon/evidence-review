@@ -61,3 +61,27 @@ def test_workload_counts_are_caller_owned_and_bounds_checked():
     raw["workload"]["answer_index"] = 4
     with pytest.raises(ValidationError):
         ReviewBundle.model_validate(raw)
+
+
+def test_claim_review_context_is_hash_bound_and_never_candidate_evidence():
+    from evidence_review.contracts import ReviewContext, digest
+    from evidence_review.evidence import evidence_views
+    from evidence_review.atomic_evidence import bundle_citations
+    from synthetic import build, Claim, source
+    b = build([("answer", "Demand may recover.", ["C1"])],
+              [Claim(claim_id="C1", text="Demand may recover.")],
+              sources=[source("Demand remains weak.\n")])
+    raw = b.model_dump(mode="json")
+    assert "review_context" not in raw["claims"][0]
+    assert ReviewBundle.model_validate(raw).bundle_hash == digest(raw)
+    b.claims[0].review_context = [ReviewContext(origin="source_search", reason="Related context",
+        citations=[located(1, "Demand remains weak.")])]
+    prepared = ReviewBundle.model_validate(b.model_dump(mode="json"))
+    assert prepared.bundle_hash != digest(raw)
+    assert prepared.claims[0].citations == []
+    assert "filing:1:1" in evidence_views(prepared)
+    assert bundle_citations(prepared)[0].excerpt == "Demand remains weak."
+    invalid = prepared.model_dump(mode="json")
+    invalid["claims"][0]["review_context"][0]["citations"][0]["source_id"] = "ineligible"
+    with pytest.raises(ValidationError):
+        ReviewBundle.model_validate(invalid)

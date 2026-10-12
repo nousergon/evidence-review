@@ -33,7 +33,6 @@ def test_atoms_and_related_controls_live_with_their_item(tmp_path):
         expect(item.locator(".atom-guidance")).to_contain_text("no separate check is assigned")
         expect(item.locator("[data-atom-row]")).to_have_count(1)
         expect(item.locator("[data-atom-row]")).to_contain_text("24.6%")
-        item.get_by_text("Materiality: margin", exact=True).click()
         expect(item.get_by_label("Materiality: margin", exact=True)).to_be_visible()
         expect(page.locator("#atoms")).to_be_hidden()
         item.get_by_role("button", name="Open the source", exact=False).click()

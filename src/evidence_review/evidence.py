@@ -222,9 +222,10 @@ def evidence_views(bundle):
     sources = {s.source_id: s for s in bundle.sources}
     views = {}
     prepared = [p for n in bundle.spans for p in n.prepared_evidence]
-    for item in [*bundle.claims, *bundle.references, *bundle.spans, *prepared]:
+    context = [p for c in bundle.claims for p in c.review_context]
+    for item in [*bundle.claims, *bundle.references, *bundle.spans, *prepared, *context]:
         cites = list(item.citations)
-        if item.calculation:
+        if getattr(item, "calculation", None):
             cites += list(calculation_citations(item.calculation))
         for c in cites:
             if c.status == "located":

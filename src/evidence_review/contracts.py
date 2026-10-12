@@ -10,7 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationInfo, model_validator, model_serializer
 
 
-PACKAGE_VERSION = "0.6.12"
+PACKAGE_VERSION = "0.6.13"
 
 
 def canonical_json(value) -> bytes:
@@ -145,6 +145,13 @@ class Calculation(Strict):
 Operand.model_rebuild()
 
 
+class ReviewContext(Strict):
+    """Navigation assistance, never an author citation or a support verdict."""
+    origin: Literal["source_search", "related_author_evidence"]
+    reason: str
+    citations: list[Citation] = Field(default_factory=list)
+
+
 class Claim(Strict):
     claim_id: str
     text: str
@@ -154,12 +161,15 @@ class Claim(Strict):
     # from the margin trend"). Display only: never a citation, never support, and it
     # never checks a row or changes any verification status.
     support_declaration: str = ""
+    review_context: list[ReviewContext] = Field(default_factory=list)
 
     @model_serializer(mode="wrap")
     def preserve_legacy_fields(self, handler):
         data = handler(self)
         if not self.support_declaration:
             data.pop("support_declaration", None)
+        if not self.review_context:
+            data.pop("review_context", None)
         return data
 
 
@@ -471,6 +481,10 @@ class ReviewBundle(Strict):
                     raise ValueError("prepared input requires actual located source leaves")
                 if operand_evidence([o], o.unit, [])["missing"]:
                     raise ValueError("prepared input must have located source evidence")
+        for claim in self.claims:
+            for context in claim.review_context:
+                for citation in context.citations:
+                    validate_citation(citation, sources)
         prepared = [p for n in self.spans for p in n.prepared_evidence]
         for c in [*self.claims, *self.references, *self.spans, *prepared]:
             for citation in c.citations:

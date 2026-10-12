@@ -33,7 +33,7 @@ def test_primary_link_keyboard_and_preview_do_not_change_judgments(tmp_path):
     assert store.load_task(b.bundle_id)['answers']['judgments'] == {}
 
 
-def test_derived_input_values_are_direct_links_in_inline_card_and_preview(tmp_path):
+def test_derived_input_values_open_evidence_in_inline_card_and_preview(tmp_path):
     with open_review(bound_bundle(), FileStore(tmp_path), launch=False, source_links=LINKS) as h, sync_playwright() as pw:
         browser = pw.chromium.launch()
         page = browser.new_page()
@@ -43,13 +43,12 @@ def test_derived_input_values_are_direct_links_in_inline_card_and_preview(tmp_pa
         expect(card).to_contain_text('Reported result: 180 bps')
         expect(card.get_by_text('Original candidate calculation', exact=True)).to_be_visible()
         for value in ['24.6', '22.8']:
-            link = card.get_by_role('link', name=value, exact=True)
-            expect(link).to_have_attribute('href', BASE + '#L6-L6')
-            expect(link).to_have_attribute('rel', 'noopener noreferrer')
+            control = card.get_by_role('button', name=value, exact=True)
+            expect(control).to_have_count(1)
         card.get_by_role('button', name='Preview calculation evidence', exact=True).click()
         preview = page.get_by_role('region', name='Evidence', exact=True)
-        expect(preview.get_by_role('link', name='24.6', exact=True)).to_have_count(1)
-        expect(preview.get_by_role('link', name='22.8', exact=True)).to_have_count(1)
+        expect(preview.get_by_role('button', name='24.6', exact=True)).to_have_count(1)
+        expect(preview.get_by_role('button', name='22.8', exact=True)).to_have_count(1)
         expect(preview).to_contain_text('Formula literal (source association not established): 100')
         expect(page.get_by_label(SUPPORT, exact=True)).to_have_value('')
         browser.close()
@@ -171,7 +170,7 @@ def test_prepared_subtotal_is_visible_inline_and_preview_with_original_defect(tm
         expect(card).to_contain_text('Prepared calculation')
         expect(card).to_contain_text('Original candidate calculation')
         expect(card).to_contain_text('Candidate citation')
-        expect(card.get_by_role('link', name='24.6', exact=True)).to_have_attribute('href', BASE + '#L6-L6')
+        expect(card.get_by_role('button', name='24.6', exact=True)).to_have_count(1)
         expect(card).to_contain_text('Candidate citation')
         expect(card).not_to_contain_text('Mathematical constant: 13')
         expect(card).to_contain_text('Mathematical constant: 100')

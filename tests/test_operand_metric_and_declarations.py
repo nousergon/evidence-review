@@ -207,7 +207,7 @@ def test_browser_expanded_row_shows_metric_tolerance_and_declaration_without_che
         more = row.locator(".atom-expand")
         expect(more.locator(".input-derivation").first).to_contain_text("24.6 pct · operating margin · FY2026")
         expect(more.locator(".input-derivation").nth(1)).to_contain_text("22.8 pct · operating margin · FY2025")
-        assert more.locator(".input-derivation a, .input-derivation span").first.get_attribute("title") == \
+        assert more.locator(".input-derivation button[title], .input-derivation span").first.get_attribute("title") == \
             "Synthetic issuer · operating margin"
         tolerance = more.locator(".calc-tolerance").first
         expect(tolerance).to_be_visible()

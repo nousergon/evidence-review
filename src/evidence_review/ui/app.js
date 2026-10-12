@@ -593,15 +593,26 @@ function renderAuthorDeclaration(d, box) {
 function operandContext(o) {
   return [o.entity, o.metric].filter(Boolean).join(" · ");
 }
+function openInputSource(o, origin) {
+  const receipt = proposedReceipt(o.citation, subject);
+  if (receipt && evidence.rendered_sources?.[receipt.source_id])
+    return viewProposedPassage(o.citation, receipt, origin);
+  // An unrenderable citation stays inspectable in the frozen evidence pane.
+  invalidateNavigation();
+  $("viewer").hidden = true;
+  $("viewer").replaceChildren();
+  $("evidence-panel").open = true;
+  $("evidence").replaceChildren();
+  cite(o.citation);
+}
 function linkedInput(o) {
-  const c = o.citation;
-  const href = c?.status === "located" && (evidence.links || {})[c.source_id]?.line_url
-    ? originalHref(c.source_id, c.excerpt, c.start_line, c.end_line) : null;
-  const value = el(href ? "a" : "span", o.value);
+  const located = o.citation?.status === "located";
+  const value = el(located ? "button" : "span", o.value);
   value.title = operandContext(o) || o.name;
-  if (href) {
-    value.href = href; value.target = "_blank"; value.rel = "noopener noreferrer";
-    value.onclick = () => logEvent("original_opened", c.source_id);
+  if (located) {
+    value.type = "button";
+    value.className = "preview-link";
+    value.onclick = () => openInputSource(o, value);
   }
   return value;
 }
@@ -628,7 +639,7 @@ function compactInput(o, box, inherited = {}) {
     const preview = el("button", "Preview");
     preview.setAttribute("aria-label", "Preview input " + label);
     preview.className = "preview-link";
-    preview.onclick = () => { $("evidence-panel").open = true; $("evidence").replaceChildren(); cite(o.citation); };
+    preview.onclick = () => openInputSource(o, preview);
     row.append(preview);
   } else {
     const c = o.citation;
@@ -1273,7 +1284,7 @@ function proposedWorksheet(supplied) {
   draft.rationale = "Confirmed supplied formula, input values and proposed source passages by selecting a recomputation judgment.";
   return draft;
 }
-function fieldControl(f, div) {
+function fieldControl(f, div, evidenceHost = div) {
   const supplied = fieldCalculation(f);
   const proposal = proposedWorksheet(supplied);
   const recomputation = (value) => ["recomputed_matches", "recomputed_differs"].includes(value);
@@ -1313,7 +1324,7 @@ function fieldControl(f, div) {
     else control.value = answers.judgments[f.field_id]?.value || "";
   }
   if (worksheetOnly && proposal)
-    div.append(el("p", "Review the supplied calculation and its source passages below. Choosing a recomputation verdict confirms them together; prepare a draft first if you need a different method."));
+    div.append(el("p", "Review the supplied calculation and its source passages. Choosing a recomputation verdict confirms them together; prepare a draft first if you need a different method."));
   else if (f.help) div.append(el("p", f.help));
   if (needsStatementConfirmation(f))
     div.append(el("p", "Supported is saved, but checked evidence is missing. " +
@@ -1381,7 +1392,7 @@ function fieldControl(f, div) {
   if (bundle.task_kind === "reference")
     div.append(el("p", "Source context is attached automatically for an explained correction or uncertainty. This does not verify it or check quantities. A verified verdict still requires every quantity checked. Additional passage attachments are optional."));
   if (f.subject_id && !f.numeric_span_id && !f.atom && !worksheetOnly) {
-    renderCandidatePassages(div, judgmentCitations(f), f.subject_id,
+    renderCandidatePassages(evidenceHost, judgmentCitations(f), f.subject_id,
       answers.judgments[f.field_id]?.selections || [], (receipt) => {
         const j = judgment(f.field_id);
         if (!j.selections.some((s) => samePassage(s, receipt))) j.selections.push(receipt);
@@ -1406,7 +1417,7 @@ function fieldControl(f, div) {
       : proposal
         ? "Check the formula, inputs and passages above. Selecting recomputed_matches or recomputed_differs confirms them together and records one linked worksheet. Arithmetic agreement alone does not establish source support. To use a different method, prepare and edit a draft first."
         : "This calculation needs a reviewer worksheet: some inputs are nested or lack exact source passages. Prepare and edit the draft before choosing a recomputation judgment."));
-    div.append(preview);
+    evidenceHost.append(preview);
     const prepare = el("button", "Use supplied calculation as draft worksheet");
     prepare.type = "button";
     prepare.onclick = () => {
@@ -1419,7 +1430,7 @@ function fieldControl(f, div) {
         input?.focus();
       } else addWorksheet(supplied.subject, supplied.calculation);
     };
-    div.append(prepare);
+    evidenceHost.append(prepare);
   }
   const attach = el("button", "Attach selected source passage");
   attach.onclick = () => {
@@ -1433,7 +1444,7 @@ function fieldControl(f, div) {
     renderForms();
     save();
   };
-  if (!worksheetOnly) div.append(attach);
+  if (!worksheetOnly) evidenceHost.append(attach);
   for (const [i, s] of (answers.judgments[f.field_id]?.selections || []).entries()) {
     const line = el("p", `${s.source_id} L${s.start_line}–L${s.end_line}: ${s.excerpt}`);
     const remove = el("button", "Remove passage");
@@ -1454,7 +1465,7 @@ function fieldControl(f, div) {
     controls.dataset.receiptKey = JSON.stringify([s.source_id, s.source_hash, s.start_line, s.end_line]);
     controls.append(remove, el("small", " · Automatic evidence receipt for checked quantities"));
     line.append(controls);
-    div.append(line);
+    evidenceHost.append(line);
   }
 }
 function quantityProgress() {
@@ -1627,12 +1638,21 @@ function renderForms() {
       const atoms = el("div"); atoms.className = "item-atoms";
       div.append(atoms);
     }
+    const evidenceHost = grouped ? el("div") : null;
+    const decisions = grouped ? el("section") : div;
+    if (grouped) {
+      evidenceHost.className = "item-evidence";
+      decisions.className = "item-decisions";
+      decisions.setAttribute("aria-label", "Final decisions for this item");
+      decisions.append(el("h4", "Final decisions for this item"));
+      div.append(evidenceHost, decisions);
+    }
     related.forEach((q) => {
       const control = el("div"); control.className = "item-judgment";
-      fieldControl(q, control);
+      fieldControl(q, control, evidenceHost || control);
       if (grouped && !q.required && !answers.judgments[q.field_id]?.value) {
-        const optional = el("details"); optional.append(el("summary", q.label), control); div.append(optional);
-      } else div.append(control);
+        const optional = el("details"); optional.append(el("summary", q.label), control); decisions.append(optional);
+      } else decisions.append(control);
     });
     const nav = el("div");
     nav.className = "item-nav";
@@ -2692,7 +2712,7 @@ function renderAtomRows() {
       group.className = "item-atoms";
       group.setAttribute("aria-label", "Source checks for " + host.dataset.itemSubject);
       group.append(el(inline ? "h4" : "summary", "Source checks for this item"));
-      const controls = host.querySelector(".item-judgment");
+      const controls = host.querySelector(".item-evidence") || host.querySelector(".item-judgment");
       if (controls) controls.before(group); else host.append(group);
       hosts.set(host.dataset.itemSubject, group);
     });
@@ -3043,7 +3063,8 @@ async function openTarget(target, origin, row, note = "") {
   const header = el("div"); header.className = "viewer-head";
   const back = el("button", "Back to row"); back.type = "button";
   back.onclick = () => origin?.focus();
-  header.append(el("h3", source ? source.title : m.source_id), back);
+  header.append(el("h3", source ? source.title : m.source_id), back,
+    originalLink(m.source_id, record.excerpt || "", record.start_line, record.end_line));
   const label = {exact: "Exact location highlighted", page_only: "Page-only location: the line is not highlighted",
     ambiguous: "Ambiguous: several matches, none chosen", unavailable: "Location unavailable"}[record.status] || record.status;
   const statusLine = el("p", `${label}${record.reason ? " · " + record.reason : ""}${note ? " · " + note : ""}`);

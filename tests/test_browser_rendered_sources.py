@@ -160,3 +160,60 @@ def test_ambiguous_atom_shows_every_candidate_and_chooses_none(tmp_path, browser
         expect(page.locator("#viewer .target-status")).to_contain_text("Candidate 2 of 2; no source was chosen")
         assert_offline(h, page, log)
         ctx.close()
+
+
+def test_calculation_operand_opens_panel_even_with_external_source_link(tmp_path, browser):
+    from test_browser_review import margin_bundle
+    b = margin_bundle()
+    sid = b.sources[0].source_id
+    asset = prepare_render_asset(b, sid)
+    links = {sid: {"url": "https://github.com/example/sources/blob/main/table.md",
+                   "line_url": "https://github.com/example/sources/blob/main/table.md#L{start}-L{end}",
+                   "label": "Open original externally"}}
+    with open_review(b, FileStore(tmp_path), launch=False, rendered_sources=[asset],
+                     source_links=links, presentation_mode=ATOMIC) as h:
+        ctx, page, log = watched(browser, h)
+        page.get_by_text('Calculation, inputs and sources', exact=True).first.click()
+        expect(page.locator('.input-derivation').first).to_be_visible()
+        page.locator('.input-derivation').filter(has_text='current:').first.get_by_role('button', name='24.6', exact=True).click()
+        expect(page.locator('#viewer .target-hit').first).to_contain_text('24.6')
+        assert len(ctx.pages) == 1
+        assert not [url for url in log['requests'] if 'github.com' in url]
+        original = page.locator('#viewer').get_by_role('link', name='Open original externally', exact=False)
+        expect(original).to_be_visible()
+        expect(original).to_have_attribute('href', links[sid]['url'] + '#L6-L6')
+        expect(original).to_have_attribute('target', '_blank')
+        expect(page.locator('#status')).to_contain_text('revision 0')
+        ctx.close()
+
+
+def test_operand_fallback_clears_previous_rendered_source(tmp_path, browser):
+    from test_browser_review import margin_bundle
+    b = margin_bundle()
+    other = b.sources[0].model_copy(update={"source_id": "fallback-source", "title": "Fallback source"})
+    b.sources.append(other)
+    b.claims[0].calculation.operands[1].citation.source_id = other.source_id
+    for span in b.spans:
+        if span.calculation:
+            span.calculation.operands[1].citation.source_id = other.source_id
+    b = validate_bundle(b.model_dump(mode='json'))
+    asset = prepare_render_asset(b, b.sources[0].source_id)
+    with open_review(b, FileStore(tmp_path), launch=False, rendered_sources=[asset], presentation_mode=ATOMIC) as h:
+        ctx = browser.new_context()
+        def without_fallback_render(route):
+            response = route.fetch()
+            data = response.json()
+            data['rendered_sources'].pop(other.source_id, None)
+            route.fulfill(response=response, json=data)
+        ctx.route('**/api/evidence', without_fallback_render)
+        page = ctx.new_page()
+        page.goto(h.url)
+        expect(page.locator('#status')).to_contain_text('Saved locally')
+        page.get_by_text('Calculation, inputs and sources', exact=True).first.click()
+        page.locator('.input-derivation').filter(has_text='current:').first.get_by_role('button', name='24.6', exact=True).click()
+        expect(page.locator('#viewer .target-hit').first).to_be_visible()
+        page.locator('.input-derivation').filter(has_text='prior:').first.get_by_role('button', name='22.8', exact=True).click()
+        expect(page.locator('#viewer')).to_be_hidden()
+        expect(page.locator('#evidence')).to_contain_text('Fallback source')
+        expect(page.locator('#status')).to_contain_text('revision 0')
+        ctx.close()

@@ -167,3 +167,10 @@ If even the event cannot be written, the failure is kept in memory (`evidence_re
 
 - **Repeated numeric citations are one candidate each (I12181).** A numeric span may cite the same location more than once; the frozen bundle contract accepts it. The default atom builder now deduplicates the span's located targets in first-seen order before deciding its state, as it already did for declared facts: two or more distinct targets make an ambiguous row between exactly those, fewer stay unavailable with the producer's reason. The bundle is not rewritten. A caller-supplied atom or render manifest that repeats a candidate is still refused, because that payload claims two alternatives where there is one.
 - **Keyboard qualification is portable (I12182).** The keyboard-only annotation test cleared the exact-text box with `Control+a`, which on macOS moves the caret instead of selecting all. It now presses `ControlOrMeta+a`. The application was not changed.
+
+
+### Calculation source navigation (0.6.12)
+
+Located calculation input values and their Preview controls open the rendered evidence panel, with frozen-source fallback when no render asset is supplied. The rendered viewer header retains the configured external source link to the cited lines, alongside the source title. Opening either view does not confirm support or change saved judgments. Consumers must supply `source_links` for direct repository links; the app does not invent repository URLs.
+
+Grouped items present their exact statement, all source checks and calculation evidence, then separate support and arithmetic decisions at the bottom. Presentation order does not alter stored judgment identities or confirmation requirements.

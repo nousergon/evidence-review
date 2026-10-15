@@ -235,6 +235,15 @@ def evidence_views(bundle):
                 from .table_context import table_context
                 view["table"] = table_context(sources[c.source_id], c.start_line, c.end_line)
                 views[key] = view
+    for claim in bundle.claims:
+        for aid_input in (claim.review_aid.inputs if claim.review_aid else []):
+            c = aid_input.citation
+            if c is not None and c.status == "located":
+                view = passage(sources[c.source_id], c.start_line, c.end_line)
+                view.pop("full_text")
+                from .table_context import table_context
+                view["table"] = table_context(sources[c.source_id], c.start_line, c.end_line)
+                views[f"{c.source_id}:{c.start_line}:{c.end_line}"] = view
     for span in bundle.spans:
         for operand in span.prepared_inputs:
             cites = ([operand.citation] if operand.citation else [])
@@ -325,6 +334,51 @@ def evaluate(formula, values):
             if isinstance(node.op, ast.Mult):
                 return a * b
             return a / b
+        raise ValueError("unsupported formula syntax")
+
+    return visit(tree)
+
+
+@deterministic
+def evaluate_interval(formula, values):
+    """Bounded Decimal interval arithmetic over named ``(low, high)`` pairs.
+
+    Same grammar as ``evaluate``. A point value is the degenerate interval
+    ``(v, v)``; a range is propagated in full, never collapsed to a midpoint.
+    Division by an interval that contains zero raises, because the quotient
+    is unbounded. Raises on unsupported syntax, unknown names and arithmetic
+    faults."""
+    if len(formula) > 1000:
+        raise ValueError("formula too long")
+    tree = ast.parse(formula, mode="eval")
+    if len(list(ast.walk(tree))) > 100:
+        raise ValueError("formula too complex")
+
+    def visit(node):
+        if isinstance(node, ast.Expression):
+            return visit(node.body)
+        if isinstance(node, ast.Constant) and type(node.value) in (int, float):
+            v = Decimal(ast.get_source_segment(formula, node))
+            return v, v
+        if isinstance(node, ast.Name):
+            lo, hi = values[node.id]
+            return Decimal(lo), Decimal(hi)
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+            lo, hi = visit(node.operand)
+            return (-hi, -lo) if isinstance(node.op, ast.USub) else (lo, hi)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult, ast.Div)):
+            (a, b), (c, d) = visit(node.left), visit(node.right)
+            if isinstance(node.op, ast.Add):
+                return a + c, b + d
+            if isinstance(node.op, ast.Sub):
+                return a - d, b - c
+            if isinstance(node.op, ast.Div):
+                if c <= 0 <= d:
+                    raise ZeroDivisionError("divisor range includes zero")
+                products = [a / c, a / d, b / c, b / d]
+            else:
+                products = [a * c, a * d, b * c, b * d]
+            return min(products), max(products)
         raise ValueError("unsupported formula syntax")
 
     return visit(tree)

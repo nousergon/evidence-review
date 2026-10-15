@@ -1,5 +1,186 @@
 {
   "$defs": {
+    "AidComparison": {
+      "additionalProperties": false,
+      "description": "Side-by-side values for statements comparing periods, segments or scenarios.",
+      "properties": {
+        "columns": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2,
+          "title": "Columns",
+          "type": "array"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/AidComparisonRow"
+          },
+          "minItems": 1,
+          "title": "Rows",
+          "type": "array"
+        }
+      },
+      "required": [
+        "columns",
+        "rows"
+      ],
+      "title": "AidComparison",
+      "type": "object"
+    },
+    "AidComparisonRow": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "cells": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Cells",
+          "type": "array"
+        }
+      },
+      "required": [
+        "label",
+        "cells"
+      ],
+      "title": "AidComparisonRow",
+      "type": "object"
+    },
+    "AidInput": {
+      "additionalProperties": false,
+      "description": "One input the statement depends on: a point value or a full range, with its source.",
+      "properties": {
+        "input_id": {
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$",
+          "title": "Input Id",
+          "type": "string"
+        },
+        "label": {
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "value": {
+          "default": "",
+          "title": "Value",
+          "type": "string"
+        },
+        "low": {
+          "default": "",
+          "title": "Low",
+          "type": "string"
+        },
+        "high": {
+          "default": "",
+          "title": "High",
+          "type": "string"
+        },
+        "unit": {
+          "default": "",
+          "title": "Unit",
+          "type": "string"
+        },
+        "period": {
+          "default": "",
+          "title": "Period",
+          "type": "string"
+        },
+        "entity": {
+          "default": "",
+          "title": "Entity",
+          "type": "string"
+        },
+        "approximate": {
+          "default": false,
+          "title": "Approximate",
+          "type": "boolean"
+        },
+        "citation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Citation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "input_id",
+        "label"
+      ],
+      "title": "AidInput",
+      "type": "object"
+    },
+    "AidQualification": {
+      "additionalProperties": false,
+      "description": "An interpretive caveat kept apart from the arithmetic.",
+      "properties": {
+        "kind": {
+          "enum": [
+            "approximation",
+            "residual",
+            "period_mismatch",
+            "human_judgment",
+            "other"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "text": {
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ],
+      "title": "AidQualification",
+      "type": "object"
+    },
+    "AidStep": {
+      "additionalProperties": false,
+      "description": "A named arithmetic step over earlier inputs and steps; its result is always derived.",
+      "properties": {
+        "step_id": {
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$",
+          "title": "Step Id",
+          "type": "string"
+        },
+        "label": {
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        },
+        "formula": {
+          "maxLength": 1000,
+          "minLength": 1,
+          "title": "Formula",
+          "type": "string"
+        },
+        "unit": {
+          "default": "",
+          "title": "Unit",
+          "type": "string"
+        }
+      },
+      "required": [
+        "step_id",
+        "label",
+        "formula"
+      ],
+      "title": "AidStep",
+      "type": "object"
+    },
     "AtomBinding": {
       "additionalProperties": false,
       "description": "One caller-declared non-numeric factual proposition inside an answer field.\n\nQuantities keep their legacy ``numeric_span_id`` binding; this binds a check\ncontrol to exactly one fact occurrence, identified by its exact offsets.",
@@ -192,6 +373,17 @@
           },
           "title": "Review Context",
           "type": "array"
+        },
+        "review_aid": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReviewAid"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -712,6 +904,63 @@
         "text"
       ],
       "title": "ReportField",
+      "type": "object"
+    },
+    "ReviewAid": {
+      "additionalProperties": false,
+      "description": "Compact tie-out for one statement: inputs, arithmetic, comparison, qualifications.\n\n``computation`` is derived on every validation with interval Decimal arithmetic,\nso a producer cannot supply its own result; an input without a located source\nor a value leaves every step that reads it unresolved, never estimated.",
+      "properties": {
+        "origin": {
+          "const": "caller_prepared",
+          "default": "caller_prepared",
+          "title": "Origin",
+          "type": "string"
+        },
+        "inputs": {
+          "items": {
+            "$ref": "#/$defs/AidInput"
+          },
+          "maxItems": 50,
+          "minItems": 1,
+          "title": "Inputs",
+          "type": "array"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/AidStep"
+          },
+          "maxItems": 50,
+          "title": "Steps",
+          "type": "array"
+        },
+        "comparison": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AidComparison"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "qualifications": {
+          "items": {
+            "$ref": "#/$defs/AidQualification"
+          },
+          "title": "Qualifications",
+          "type": "array"
+        },
+        "computation": {
+          "additionalProperties": true,
+          "title": "Computation",
+          "type": "object"
+        }
+      },
+      "required": [
+        "inputs"
+      ],
+      "title": "ReviewAid",
       "type": "object"
     },
     "ReviewContext": {

@@ -124,6 +124,11 @@ def build_manifest(root, verification, coverage, tests_passed, source_tree):
             "whole atom manifest with exactly the distinct candidates in first-seen order; repeat-only stays unavailable; "
             "frozen bundle bytes unchanged; caller manifests that repeat a candidate still refused (synthetic)",
             "keyboard-only annotation test clears text with the portable ControlOrMeta+a (Linux Chromium in this record)",
+            "optional claim review_aid tie-out: signed point and range inputs with unit, period, entity and exact "
+            "source links, steps derived by bounded Decimal interval arithmetic (ranges never collapsed, divisors "
+            "through zero are calculation errors, unresolved inputs leave dependent steps unresolved), comparison "
+            "table and labelled qualifications shown above the item verdict with original excerpts collapsed; absent "
+            "aid keeps sealed bundle hashes; producer-supplied results replaced (synthetic, Chromium)",
         ],
         "unverified": [
             "human usability and reviewer effort (no pilot run)",

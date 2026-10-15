@@ -10,7 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationInfo, model_validator, model_serializer
 
 
-PACKAGE_VERSION = "0.6.13"
+PACKAGE_VERSION = "0.6.14"
 
 
 def canonical_json(value) -> bytes:
@@ -152,6 +152,144 @@ class ReviewContext(Strict):
     citations: list[Citation] = Field(default_factory=list)
 
 
+AID_ID = r"^[A-Za-z_][A-Za-z0-9_]{0,63}$"
+REVIEW_AID_NOTE = ("Caller-prepared review aid: the inputs, arithmetic and comparison needed to tie out "
+                   "the statement. It is not the author's citation, not a judge verdict and never "
+                   "a support judgment.")
+
+
+class AidInput(Strict):
+    """One input the statement depends on: a point value or a full range, with its source."""
+    input_id: str = Field(pattern=AID_ID)
+    label: str = Field(min_length=1)
+    # Signed decimal text. A range supplies ``low`` and ``high`` instead; both are kept.
+    value: str = ""
+    low: str = ""
+    high: str = ""
+    unit: str = ""
+    period: str = ""
+    entity: str = ""
+    approximate: bool = False
+    citation: Citation | None = None
+
+    @model_validator(mode="after")
+    def shape(self):
+        if bool(self.low) != bool(self.high):
+            raise ValueError("a range input needs both low and high")
+        if self.value and self.low:
+            raise ValueError("an input is a point value or a range, not both")
+        located = self.citation is not None and self.citation.status == "located"
+        if located and not (self.value or self.low):
+            raise ValueError("a located input needs its value")
+        for text in (self.value, self.low, self.high):
+            if text:
+                try:
+                    if not Decimal(text).is_finite():
+                        raise InvalidOperation
+                except InvalidOperation:
+                    raise ValueError("input values are finite decimal numbers")
+        if self.low and Decimal(self.low) > Decimal(self.high):
+            raise ValueError("range low exceeds high")
+        return self
+
+
+class AidStep(Strict):
+    """A named arithmetic step over earlier inputs and steps; its result is always derived."""
+    step_id: str = Field(pattern=AID_ID)
+    label: str = Field(min_length=1)
+    formula: str = Field(min_length=1, max_length=1000)
+    unit: str = ""
+
+
+class AidComparisonRow(Strict):
+    label: str = Field(min_length=1)
+    # One input_id or step_id per column, or "" where the column does not apply.
+    cells: list[str]
+
+
+class AidComparison(Strict):
+    """Side-by-side values for statements comparing periods, segments or scenarios."""
+    columns: list[str] = Field(min_length=2)
+    rows: list[AidComparisonRow] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def rectangular(self):
+        if any(len(r.cells) != len(self.columns) for r in self.rows):
+            raise ValueError("comparison rows need one cell per column")
+        return self
+
+
+class AidQualification(Strict):
+    """An interpretive caveat kept apart from the arithmetic."""
+    kind: Literal["approximation", "residual", "period_mismatch", "human_judgment", "other"]
+    text: str = Field(min_length=1)
+
+
+class ReviewAid(Strict):
+    """Compact tie-out for one statement: inputs, arithmetic, comparison, qualifications.
+
+    ``computation`` is derived on every validation with interval Decimal arithmetic,
+    so a producer cannot supply its own result; an input without a located source
+    or a value leaves every step that reads it unresolved, never estimated."""
+    origin: Literal["caller_prepared"] = "caller_prepared"
+    inputs: list[AidInput] = Field(min_length=1, max_length=50)
+    steps: list[AidStep] = Field(default_factory=list, max_length=50)
+    comparison: AidComparison | None = None
+    qualifications: list[AidQualification] = Field(default_factory=list)
+    computation: dict = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def derive(self):
+        from .evidence import evaluate_interval, formula_names, UnsafeFormula
+
+        ids = [i.input_id for i in self.inputs] + [s.step_id for s in self.steps]
+        if len(set(ids)) != len(ids):
+            raise ValueError("duplicate review aid input or step id")
+        known, values, unresolved, steps = set(), {}, {}, {}
+        for i in self.inputs:
+            known.add(i.input_id)
+            located = i.citation is not None and i.citation.status == "located"
+            if not located or not (i.value or i.low):
+                unresolved[i.input_id] = "no located source value"
+            else:
+                values[i.input_id] = (i.low, i.high) if i.low else (i.value, i.value)
+        for s in self.steps:
+            try:
+                names = formula_names(s.formula)
+            except (SyntaxError, UnsafeFormula) as exc:
+                raise ValueError(f"review aid step {s.step_id}: invalid formula") from exc
+            if set(names) - known:
+                raise ValueError(f"review aid step {s.step_id} reads an unknown or later id")
+            known.add(s.step_id)
+            missing = [n for n in names if n in unresolved]
+            if missing:
+                reason = "unresolved input: " + ", ".join(missing)
+                unresolved[s.step_id] = reason
+                steps[s.step_id] = {"status": "unresolved", "reason": reason}
+                continue
+            try:
+                lo, hi = evaluate_interval(s.formula, {n: values[n] for n in names})
+                if not (lo.is_finite() and hi.is_finite()):
+                    raise ArithmeticError("non-finite result")
+            except ArithmeticError as exc:
+                reason = ("division by a value or range that includes zero"
+                          if isinstance(exc, ZeroDivisionError) else "arithmetic error")
+                unresolved[s.step_id] = reason
+                steps[s.step_id] = {"status": "calculation_error", "reason": reason}
+                continue
+            values[s.step_id] = (str(lo), str(hi))
+            steps[s.step_id] = ({"status": "computed", "value": str(lo)} if lo == hi
+                                else {"status": "computed", "low": str(lo), "high": str(hi)})
+        if self.comparison:
+            for row in self.comparison.rows:
+                if set(c for c in row.cells if c) - known:
+                    raise ValueError("comparison cell names an unknown input or step")
+        self.computation = {"steps": steps, "unresolved_inputs": sorted(
+            i.input_id for i in self.inputs if i.input_id in unresolved), "evidence_verified": False,
+            "note": REVIEW_AID_NOTE}
+        return self
+
+
 class Claim(Strict):
     claim_id: str
     text: str
@@ -162,6 +300,8 @@ class Claim(Strict):
     # never checks a row or changes any verification status.
     support_declaration: str = ""
     review_context: list[ReviewContext] = Field(default_factory=list)
+    # Optional compact tie-out shown above the item's verdict. Display aid only.
+    review_aid: ReviewAid | None = None
 
     @model_serializer(mode="wrap")
     def preserve_legacy_fields(self, handler):
@@ -170,6 +310,8 @@ class Claim(Strict):
             data.pop("support_declaration", None)
         if not self.review_context:
             data.pop("review_context", None)
+        if self.review_aid is None:
+            data.pop("review_aid", None)
         return data
 
 
@@ -485,6 +627,10 @@ class ReviewBundle(Strict):
             for context in claim.review_context:
                 for citation in context.citations:
                     validate_citation(citation, sources)
+            if claim.review_aid:
+                for aid_input in claim.review_aid.inputs:
+                    if aid_input.citation:
+                        validate_citation(aid_input.citation, sources)
         prepared = [p for n in self.spans for p in n.prepared_evidence]
         for c in [*self.claims, *self.references, *self.spans, *prepared]:
             for citation in c.citations:

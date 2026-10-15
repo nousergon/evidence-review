@@ -684,6 +684,97 @@ function renderCalculation(c, box, preview = false, inputs = c.operands, checks 
     calculationTechnical(c, details); box.append(details);
   }
 }
+// Compact tie-out: inputs → arithmetic/comparison → qualifications, above the verdict.
+// Values come from the bundle; step results are the package's derived interval arithmetic.
+const QUALIFICATION_LABELS = {approximation: "Approximation", residual: "Residual", period_mismatch: "Period mismatch",
+  human_judgment: "Needs human judgment", other: "Note"};
+function aidValue(i) {
+  const v = i.low ? `${i.low} to ${i.high}` : i.value || "?";
+  return (i.approximate ? "≈ " : "") + v;
+}
+function aidStepValue(r) {
+  if (!r || r.status !== "computed") return "?";
+  return r.low !== undefined ? `${r.low} to ${r.high}` : r.value;
+}
+function aidCell(aid, id) {
+  const input = aid.inputs.find((i) => i.input_id === id);
+  if (input) {
+    const located = input.citation?.status === "located";
+    const value = el(located ? "button" : "span", aidValue(input) + (input.unit ? " " + input.unit : ""));
+    if (located) {
+      value.type = "button"; value.className = "preview-link";
+      value.setAttribute("aria-label", `Open source for ${input.label}`);
+      value.onclick = () => openInputSource(input, value);
+    }
+    return value;
+  }
+  const step = aid.steps.find((s) => s.step_id === id);
+  return el("span", step ? aidStepValue(aid.computation.steps[id]) + (step.unit ? " " + step.unit : "") : "");
+}
+function renderReviewAid(aid, box) {
+  const section = el("section"); section.className = "review-aid";
+  section.setAttribute("aria-label", "Tie-out for this statement");
+  section.append(el("h4", "Tie-out"));
+  const note = el("small", aid.computation.note); note.className = "review-aid-note";
+  section.append(note);
+  const inputs = el("table"); inputs.className = "review-aid-inputs";
+  const head = el("tr");
+  ["Input", "Value", "Unit · period · entity", "Source"].forEach((h) => head.append(el("th", h)));
+  inputs.append(head);
+  aid.inputs.forEach((i) => {
+    const row = el("tr"); row.dataset.aidInput = i.input_id;
+    const value = el("td"); value.append(aidCell(aid, i.input_id));
+    const source = el("td");
+    const c = i.citation;
+    if (c?.status === "located") {
+      if ((evidence.links || {})[c.source_id]) source.append(originalLink(c.source_id, c.excerpt, c.start_line, c.end_line));
+      else source.append(el("span", `${c.source_id} L${c.start_line}`));
+    } else {
+      source.append(el("span", "Source unresolved" + (c?.reason ? ": " + c.reason : "")));
+      row.classList.add("unresolved");
+    }
+    row.append(el("td", i.label), value, el("td", [i.unit, i.period, i.entity].filter(Boolean).join(" · ")), source);
+    inputs.append(row);
+  });
+  section.append(inputs);
+  if (aid.steps.length) {
+    const steps = el("ol"); steps.className = "review-aid-steps";
+    const labelOf = (id) => aid.inputs.find((i) => i.input_id === id)?.label || aid.steps.find((s) => s.step_id === id)?.label || id;
+    aid.steps.forEach((s) => {
+      const r = aid.computation.steps[s.step_id];
+      const li = el("li"); li.dataset.aidStep = s.step_id;
+      const readable = s.formula.replace(/[A-Za-z_]\w*/g, (name) => `[${labelOf(name)}]`);
+      li.append(el("strong", s.label + ": "), el("span", readable + " = "));
+      const result = el("span", r.status === "computed" ? aidStepValue(r) + (s.unit ? " " + s.unit : "") : `unresolved (${r.reason})`);
+      result.className = "review-aid-result" + (r.status === "computed" ? "" : " unresolved");
+      li.append(result);
+      steps.append(li);
+    });
+    section.append(steps);
+  }
+  if (aid.comparison) {
+    const table = el("table"); table.className = "review-aid-comparison";
+    const header = el("tr"); header.append(el("th", ""));
+    aid.comparison.columns.forEach((c) => header.append(el("th", c)));
+    table.append(header);
+    aid.comparison.rows.forEach((r) => {
+      const row = el("tr"); row.append(el("th", r.label));
+      r.cells.forEach((id) => { const td = el("td"); if (id) td.append(aidCell(aid, id)); row.append(td); });
+      table.append(row);
+    });
+    section.append(table);
+  }
+  if (aid.qualifications.length) {
+    const list = el("ul"); list.className = "review-aid-qualifications";
+    aid.qualifications.forEach((q) => {
+      const li = el("li"); li.dataset.qualification = q.kind;
+      li.append(el("strong", (QUALIFICATION_LABELS[q.kind] || "Note") + ": "), document.createTextNode(q.text));
+      list.append(li);
+    });
+    section.append(list);
+  }
+  box.append(section);
+}
 function renderNumberCalculation(span, box, preview = false) {
   const prepared = (span.prepared_evidence || []).filter((p) => p.calculation);
   if (prepared.length) {
@@ -1641,6 +1732,7 @@ function renderForms() {
         div.append(facts);
       }
       div.append(el("small", bundle.task_kind === "reference" ? "Verify the reference against its sources, units, period and arithmetic." : isReference(f.subject_id) ? "Coverage: decide whether the answer addresses this reference." : "Evidence support: decide whether the source supports the statement as written."));
+      if (item.review_aid) renderReviewAid(item.review_aid, div);
     }
     const quantities = bundle.form.filter((q) => q.numeric_span_id && q.subject_id === f.subject_id);
     if (quantities.length) {
@@ -2727,10 +2819,12 @@ function renderAtomRows() {
   if (bundle.task_kind !== "reference") {
     document.querySelectorAll("[data-item-subject]").forEach((host) => {
       const inline = host.tagName === "DETAILS" || host.classList.contains("current");
-      const group = el(inline ? "div" : "details");
+      // With a tie-out, the compact breakdown is primary; original excerpts stay one click away.
+      const aid = !!bundle.claims.find((c) => c.claim_id === host.dataset.itemSubject)?.review_aid;
+      const group = el(inline && !aid ? "div" : "details");
       group.className = "item-atoms";
       group.setAttribute("aria-label", "Source checks for " + host.dataset.itemSubject);
-      group.append(el(inline ? "h4" : "summary", "Source checks for this item"));
+      group.append(el(inline && !aid ? "h4" : "summary", aid ? "Original excerpts and source checks" : "Source checks for this item"));
       const controls = host.querySelector(".item-evidence") || host.querySelector(".item-judgment");
       if (controls) controls.before(group); else host.append(group);
       hosts.set(host.dataset.itemSubject, group);
